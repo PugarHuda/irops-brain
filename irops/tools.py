@@ -22,6 +22,7 @@ from irops.ingest import EPOCH, MIN_PAX_CONN, carrier_of, fdp_limit
 
 TIMEOUT_MS = 8000
 TURN_PAD = 15  # FDP ends 15 min after block-in
+SIGNIFICANT_DELAY = 180  # 14 CFR 260.6: a domestic arrival 3h+ late is a significant change
 
 
 def hhmm(m, tz="UTC"):
@@ -166,11 +167,23 @@ class Tools:
             MATCH (r:Rule {id: '14CFR117.13'})
             RETURN c.id AS crew, f.id AS flight, f.origin AS at, over AS over_by, r.id AS rule, r.url AS rule_url
             ORDER BY f.dep""", {"imp": imp, "pad": TURN_PAD})
+        # passengers owed a refund if they ask (14 CFR 260.6): last leg 3h+ late, or a leg cancelled
+        owed = self._run("""
+            UNWIND $imp AS i
+            MATCH (f:Flight {id: i.id})<-[s:SEGMENT]-(b:Booking {status: 'confirmed'}) WHERE i.delay >= $sig
+            OPTIONAL MATCH (b)-[n:SEGMENT]->() WHERE n.seq > s.seq
+            WITH b, count(n) AS later WHERE later = 0
+            RETURN collect(DISTINCT b.id) AS late""", {"imp": imp, "sig": SIGNIFICANT_DELAY})[0]["late"]
+        owed += self._run("""MATCH (f:Flight) WHERE NOT f:Active MATCH (f)<-[:SEGMENT]-(b:Booking {status: 'confirmed'})
+            RETURN collect(DISTINCT b.id) AS c""")[0]["c"]
+        owed_pax = self._run("UNWIND $ids AS i MATCH (b:Booking {id: i}) RETURN coalesce(sum(b.pax), 0) AS n",
+                             {"ids": sorted(set(owed))})[0]["n"]
         paths = [r.pop("path") for r in down]
         summary = {"roots": len(resolved), "downstream_flights": len(down),
                    "delay_minutes": sum(r["delay"] for r in down),
                    "pax_delayed": sum(r["pax"] for r in down),
-                   "pax_misconnecting": sum(m["pax"] for m in mis), "crews_illegal": len(fdp)}
+                   "pax_misconnecting": sum(m["pax"] for m in mis), "crews_illegal": len(fdp),
+                   "pax_refund_eligible": int(owed_pax)}
         return self._result("answered" if down or mis or fdp else "not_in_graph", down, paths, start,
                             misconnects=mis, crew_fdp_breaches=fdp, summary=summary, unknown=unknown)
 
@@ -317,14 +330,23 @@ class Tools:
             RETURN d.id AS decision, d.agent AS agent, d.kind AS kind, d.summary AS summary, d.status AS status,
                    d.at AS at, collect(r.id) AS rules ORDER BY d.at DESC LIMIT 10""", {"k": about})
         lessons = self._run("""MATCH (l:Lesson)-[:ABOUT]->(x) WHERE coalesce(x.id, x.code) = $k
-            RETURN l.text AS lesson, l.at AS at, l.session AS session ORDER BY l.at DESC LIMIT 5""", {"k": about})
+            RETURN l.text AS lesson, l.at AS at, l.session AS session, coalesce(l.seen, 1) AS times_seen
+            ORDER BY l.at DESC LIMIT 5""", {"k": about})
         return self._result("from_memory" if rows or lessons else "not_in_graph", rows, start=start, lessons=lessons)
 
     def remember(self, agent, kind, summary, about, rules=(), evidence=None, status="proposed", session=None,
                  action=None):
         """Writes a Decision node linked to what it is about and the rules it relies on.
-        `action` is the JSON of the operational write a human must approve."""
+        `action` is the JSON of the operational write a human must approve. If a human already rejected this
+        exact action (and nobody has reset since), it is stored as 'withheld': visible, not approvable."""
         start = len(self.trace)
+        action = json.dumps(action) if action else None
+        if action and status == "proposed":
+            prior = self._run("""MATCH (d:Decision {status: 'rejected', action: $a}) WHERE d.cleared IS NULL
+                RETURN d.id AS id ORDER BY d.at DESC LIMIT 1""", {"a": action})
+            if prior:
+                status = "withheld"
+                summary += f" Withheld: a human rejected this exact action earlier (decision {prior[0]['id'][:8]})."
         rows = self._run("""
             MATCH (ag:Agent {name: $agent})
             CREATE (d:Decision {id: randomUUID(), agent: $agent, kind: $kind, summary: $summary,
@@ -341,7 +363,7 @@ class Tools:
             RETURN DISTINCT d.id AS decision""",
                          {"agent": agent, "kind": kind, "summary": summary, "status": status, "at": self.now(),
                           "session": session, "evidence": json.dumps(evidence) if evidence else "", "about": list(about),
-                          "rules": list(rules), "action": json.dumps(action) if action else None}, write=True)
+                          "rules": list(rules), "action": action}, write=True)
         return self._result("answered" if rows else "rejected", rows, start=start)
 
     def handoff(self, frm, to, kind, about, payload, session):
@@ -389,7 +411,9 @@ class Tools:
 
     def learn(self, text, about, session):
         start = len(self.trace)
-        self._run("""CREATE (l:Lesson {text: $t, at: $at, session: $s}) WITH l
+        # the same lesson learned again is counted, not duplicated
+        self._run("""MERGE (l:Lesson {text: $t}) ON CREATE SET l.first_at = $at
+            SET l.at = $at, l.session = $s, l.seen = coalesce(l.seen, 0) + 1 WITH l
             MATCH (x) WHERE (x:Airport AND x.code IN $about) OR (x:Flight AND x.id IN $about) MERGE (l)-[:ABOUT]->(x)""",
                   {"t": text, "at": self.now(), "s": session, "about": list(about)}, write=True)
         return self._result("answered", start=start)
@@ -491,6 +515,20 @@ class Tools:
             RETURN DISTINCT b.id AS booking""", {"id": booking_id, "flights": list(flights)}, write=True)
         return self._result("answered" if rows else "rejected", rows, start=start)
 
+    def refund(self, booking_id):
+        """Refund a booking nobody can re-route (14 CFR 260.6): its seats go back on sale. The itinerary is kept
+        in b.orig, so reset_ops restores it."""
+        start = len(self.trace)
+        rows = self._run("""
+            MATCH (b:Booking {id: $id})-[s:SEGMENT]->(f:Flight) WHERE b.status <> 'refunded'
+            WITH b, s, f ORDER BY s.seq
+            WITH b, collect(s) AS ss, collect(f) AS fs
+            SET b.orig = coalesce(b.orig, [f IN fs | f.id]), b.status = 'refunded'
+            FOREACH (f IN fs | SET f.pax = f.pax - b.pax)
+            FOREACH (s IN ss | DELETE s)
+            RETURN b.id AS booking, b.pax AS pax, size(fs) AS seats_released_on""", {"id": booking_id}, write=True)
+        return self._result("answered" if rows else "rejected", rows, start=start)
+
     def live_conditions(self):
         """Airports in this airline's network that the FAA or the weather constrain right now, with how much of
         the network runs through each (routes and scheduled departures per day) and which spoke airports
@@ -541,14 +579,19 @@ class Tools:
                 RETURN b.status AS status, s.seq AS seq, f.id AS flight, f:Active AS active ORDER BY s.seq""",
                              {"b": act["booking"]})
             ok = [r["flight"] for r in rows] == list(act["flights"]) and all(r["active"] for r in rows)
+        elif op == "refund":
+            rows = self._run("""MATCH (b:Booking {id: $b}) OPTIONAL MATCH (b)-[s:SEGMENT]->()
+                RETURN b.status AS status, count(s) AS segments""", {"b": act["booking"]})
+            ok = rows and rows[0]["status"] == "refunded" and rows[0]["segments"] == 0
         else:
             rows, ok = [], False
         return self._result("answered" if ok else "rejected", rows, start=start,
                             reason=None if ok else "the graph does not show the intended state")
 
-    def reset_ops(self):
+    def reset_ops(self, forget_rejections=False):
         """Undo every simulated operational change: delays, cancellations, reserve swaps,
-        rebookings and claims. Memory (decisions, lessons) is kept."""
+        rebookings, refunds and claims. Memory (decisions, lessons) is kept; with forget_rejections
+        (the operator's reset, not a scenario reload) earlier rejections stop withholding proposals."""
         self._run("MATCH (f:Flight) WHERE f.status <> 'scheduled' SET f.delay = 0, f.status = 'scheduled', f:Active",
                   write=True)
         self._run("MATCH (:Crew)-[a:ASSIGNED]->() WHERE a.replaced IS NOT NULL DELETE a", write=True)
@@ -566,7 +609,9 @@ class Tools:
         self._run("MATCH (:Crew)-[c:CLAIMED_FOR]->() DELETE c", write=True)
         self._run("MATCH (:Agent)-[c:CLAIMED]->() DELETE c", write=True)
         # proposals made against the old state must not be approved against the new one
-        self._run("MATCH (d:Decision {status: 'proposed'}) SET d.status = 'superseded'", write=True)
+        self._run("MATCH (d:Decision) WHERE d.status IN ['proposed', 'withheld'] SET d.status = 'superseded'", write=True)
+        if forget_rejections:  # they stay on record, marked cleared
+            self._run("MATCH (d:Decision {status: 'rejected'}) WHERE d.cleared IS NULL SET d.cleared = true", write=True)
 
 
 # Tool schemas exposed to the LLM. Writes that change the operation are NOT here:

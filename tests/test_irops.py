@@ -64,6 +64,7 @@ def main():
 
     t.reset_ops()
     approvals_are_atomic_verified_and_reversible()
+    refunds_and_rejections_are_remembered()
     other_airline_is_isolated()
     names_and_constraints()
     mcp_serves_the_catalogue()
@@ -157,6 +158,34 @@ def approvals_are_atomic_verified_and_reversible():
     t.reset_ops()
     after = snapshot(t)
     assert after == before, (before, after)  # every approved change was undone, nothing deleted for good
+
+
+def refunds_and_rejections_are_remembered():
+    from irops import agents
+    t = Tools()
+    t.reset_ops()
+    before = snapshot(t)
+    out = agents.run("den-elliott")
+    assert out["summary"]["pax_refund_eligible"] > 0, out["summary"]
+    # a refund is a real, verified write: segments gone, seats released, restored by reset
+    bk = t._run("""MATCH (b:Booking {status: 'confirmed'})-[:SEGMENT {seq: 1}]->(f:Flight) WHERE f.dep > 1440 + 16 * 60
+                   RETURN b.id AS b, b.pax AS pax, f.id AS f, f.pax AS fpax LIMIT 1""")[0]
+    d = t.remember("pax", "refund", "test refund", [bk["b"]], ["DOT-REFUND-2024"], session="t",
+                   action={"op": "refund", "booking": bk["b"]})["rows"][0]["decision"]
+    r = agents.approve(d)
+    assert r["ok"] and r["verification"]["rows"][0]["segments"] == 0, r
+    assert t._run("MATCH (f:Flight {id: $f}) RETURN f.pax AS n", {"f": bk["f"]})[0]["n"] == bk["fpax"] - bk["pax"]
+    # a human rejection is remembered: the same action is withheld on the next run, and cannot be approved
+    p = next(p for p in out["proposals"] if p["kind"] == "cancel_round_trip" and p["status"] == "proposed")
+    assert agents.reject(p["id"])["ok"]
+    again = next(x for x in agents.run("den-elliott")["proposals"] if x["action"] == p["action"])
+    assert again["status"] == "withheld" and "rejected" in again["summary"], again
+    assert not agents.approve(again["id"])["ok"]
+    t.reset_ops(forget_rejections=True)  # the operator's reset: the rejection stops withholding
+    fresh = next(x for x in agents.run("den-elliott")["proposals"] if x["action"] == p["action"])
+    assert fresh["status"] == "proposed", fresh
+    t.reset_ops()
+    assert snapshot(t) == before
 
 
 def other_airline_is_isolated():

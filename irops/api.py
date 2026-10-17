@@ -44,9 +44,11 @@ def ensure_graphs():
             empty = not Tools(tenant).g.ro_query("MATCH (f:Flight) RETURN f LIMIT 1").result_set
         except Exception:  # graph key missing altogether
             empty = True
+        from irops import ingest
         if empty:
-            from irops import ingest
             ingest.load(tenant)
+        else:  # rule text is tiny and may have been edited since the graph was built
+            ingest.batched("UNWIND $rows AS r MERGE (x:Rule {id: r.id}) SET x += r", ingest.RULES, Tools(tenant).g)
 
 
 @contextlib.asynccontextmanager
@@ -110,9 +112,9 @@ def reject(decision_id: str, tenant: str = "irops_WN"):
 
 @app.post("/api/reset")
 def reset(tenant: str = "irops_WN"):
-    """Undo every approved change in one airline's graph (memory is kept)."""
+    """Undo every approved change in one airline's graph and let rejected actions be proposed again."""
     with writing(30):
-        Tools(tenant_of(tenant)).reset_ops()
+        Tools(tenant_of(tenant)).reset_ops(forget_rejections=True)
     return {"ok": True}
 
 

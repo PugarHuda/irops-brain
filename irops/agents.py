@@ -6,8 +6,9 @@ locks, Lesson nodes are what the next session remembers. Every proposal carries
 the graph path that justifies it, and nothing changes the operation until a
 human approves it.
 
-The policy is deterministic (same graph -> same plan). An LLM (OpenRouter free models), when a key
-is present, writes the briefing and answers questions through the same tools.
+The policy is deterministic (same graph -> same plan), except that a human rejection is remembered: the
+same action is withheld next time. An LLM (OpenRouter free models), when a key is present, answers
+questions through the same tools.
 """
 import json
 import uuid
@@ -83,7 +84,7 @@ def ops_agent(s: Session):
     return {"lessons": lessons, "summary": prop.get("summary", {})}
 
 
-def crew_agent(s: Session, lessons):
+def crew_agent(s: Session):
     t, a = s.t, "crew"
     work = s.call(a, "inbox", "work handed over by ops", agent=a, session=s.id)
     used = 0
@@ -131,8 +132,9 @@ def pax_agent(s: Session):
                        [b["booking"]] + best["flights"], evidence=opt["paths"][0], session=s.id,
                        action={"op": "apply_rebook", "booking": b["booking"], "flights": best["flights"]})
         else:
-            t.remember(a, "refund", f"No feasible re-routing for {b['booking']} today; offer refund.",
-                       [b["booking"]], ["DOT-REFUND-2024"], session=s.id, action=None)
+            t.remember(a, "refund", f"No feasible re-routing for {b['booking']} ({b['pax']} pax {b['origin']}->{b['dest']}, "
+                       f"{b['reason']}) today. Refund it, as 14 CFR 260.6 requires, and put its seats back on sale.",
+                       [b["booking"]], ["DOT-REFUND-2024"], session=s.id, action={"op": "refund", "booking": b["booking"]})
         done += 1
     return done
 
@@ -154,14 +156,14 @@ def run(scenario="den-elliott", tenant=None):
     sc = load_scenario(scenario, t)
     s = Session(t, sc)
     ops = ops_agent(s)
-    used = crew_agent(s, ops["lessons"])
+    used = crew_agent(s)
     pax_agent(s)
     ops_followup(s)
     summ = ops["summary"]
     for ap in sc["airports"]:
         t.learn(f"{sc['date']} {ap} at {hhmm(sc['clock'])} UTC: {summ.get('roots', 0)} delayed flights rippled into "
                 f"{summ.get('downstream_flights', 0)} more, {summ.get('crews_illegal', 0)} crews over duty limit, "
-                f"{used} reserves claimed. Pre-position reserves from the nearest A* bases early next time.",
+                f"{used} reserves claimed." + (" Pre-position reserves from the nearest A* bases early next time." if used else ""),
                 [ap], s.id)
     proposals = t.decisions(session=s.id)
     briefing = brief(sc, summ, proposals, ops["lessons"])
@@ -188,6 +190,8 @@ def approve(decision_id, tenant="irops_WN"):
             res = t.assign_reserve(act["reserve"], act["flight"], act["replaces"])
         elif op == "apply_rebook":
             res = t.apply_rebook(act["booking"], act["flights"])
+        elif op == "refund":
+            res = t.refund(act["booking"])
         else:
             res = {"outcome": "rejected", "rows": [], "reason": f"unknown op {op}"}
         check = t.read_back(op, act)
@@ -220,12 +224,18 @@ def brief(sc, summ, proposals, lessons):
     lines = [f"{sc['title']}. {summ.get('roots', 0)} flights already late are projected to delay "
              f"{summ.get('downstream_flights', 0)} more ({summ.get('pax_delayed', 0):,} passengers), break "
              f"{int(summ.get('pax_misconnecting', 0)):,} passenger connections and push {summ.get('crews_illegal', 0)} "
-             "crews past their legal duty limit."]
+             "crews past their legal duty limit. "
+             f"{summ.get('pax_refund_eligible', 0):,} passengers are owed a refund if they ask (arriving 3h+ late or "
+             "booked on a cancelled flight, 14 CFR 260.6)."]
     if kinds:
         lines.append("Proposed: " + ", ".join(f"{v} x {k.replace('_', ' ')}" for k, v in kinds.items()) +
                      ". Each proposal carries the graph path behind it and waits for approval.")
+    held = sum(p["status"] == "withheld" for p in proposals)
+    if held:
+        lines.append(f"{held} action(s) a human already rejected were not proposed again.")
     if lessons:
-        lines.append("Remembered from an earlier session: " + lessons[0]["lesson"])
+        n = lessons[0].get("times_seen", 1)
+        lines.append(f"Remembered from {'an earlier session' if n == 1 else f'{n} earlier sessions'}: " + lessons[0]["lesson"])
     return {"by": "template", "text": " ".join(lines)}
 
 

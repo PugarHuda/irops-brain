@@ -216,9 +216,11 @@ RULES = [
     {"id": "14CFR117.21", "title": "Reserve status",
      "text": "Short-call reserve availability period may not exceed 14 hours; FDP plus reserve availability limits apply.",
      "url": "https://www.ecfr.gov/current/title-14/chapter-I/subchapter-G/part-117/section-117.21"},
-    {"id": "DOT-REFUND-2024", "title": "Automatic refunds for cancelled flights",
-     "text": "Passengers are entitled to a refund if their flight is cancelled or significantly changed and they do not accept rebooking.",
-     "url": "https://www.transportation.gov/briefing-room/biden-harris-administration-announces-final-rule-requiring-automatic-refunds-airline"},
+    {"id": "DOT-REFUND-2024", "title": "14 CFR 260.6: refunds for cancelled or significantly changed flights",
+     "text": "A passenger whose flight is cancelled, or significantly changed (a domestic flight arriving 3 or more hours "
+             "late), and who does not accept the alternative offered, is owed a refund: within 7 business days for "
+             "card payments, 20 calendar days otherwise.",
+     "url": "https://www.law.cornell.edu/cfr/text/14/260.6"},
 ]
 
 

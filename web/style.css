@@ -44,7 +44,7 @@ main > section { padding: 24px 28px; border-bottom: 1px solid var(--line); min-w
 .story h2 { grid-column: 1 / -1; margin-bottom: 8px; }
 .story p { margin: 0 0 12px; }
 .briefing { font-size: 1.1rem; border-left: 4px solid var(--magenta); padding-left: 14px; }
-.impact { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(4, 1fr); margin: 8px 0 0; border-top: 1px solid var(--line); }
+.impact { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); margin: 8px 0 0; border-top: 1px solid var(--line); }
 .impact div { padding: 12px 12px 0 0; }
 .impact dt { color: var(--ink-soft); font-size: .95rem; }
 .impact dd { margin: 0; font-family: var(--display); font-size: 2.6rem; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; }
@@ -86,7 +86,7 @@ main > section { padding: 24px 28px; border-bottom: 1px solid var(--line); min-w
 .stamp { position: absolute; right: 12px; top: 8px; font-family: var(--display); font-weight: 700; font-size: 1.3rem;
   border: 2.5px solid currentColor; padding: 0 8px; transform: rotate(-7deg); opacity: .85; }
 .stamp.approved { color: var(--green); } .stamp.rejected, .stamp.failed { color: var(--magenta); }
-.stamp.superseded { color: var(--ink-soft); }
+.stamp.superseded, .stamp.withheld { color: var(--ink-soft); }
 .strip.done .actions button:not(.ev) { display: none; }
 .verify { font-size: .85rem; color: var(--green); margin-top: 4px; }
 .verify.bad { color: var(--magenta); }

@@ -4,13 +4,13 @@ const $ = (id) => document.getElementById(id);
 const AGENTS = { ops: "Ops control", crew: "Crew scheduling", pax: "Passenger recovery" };
 const KIND = {
   cancel_round_trip: "Cancel round trip", publish_delays: "Publish delays", assign_reserve: "Assign reserve",
-  rebook: "Rebook", refund: "Offer refund",
+  rebook: "Rebook", refund: "Refund",
 };
 const RULE_URL = {
   "14CFR117.13": "https://www.ecfr.gov/current/title-14/chapter-I/subchapter-G/part-117/section-117.13",
   "14CFR117.21": "https://www.ecfr.gov/current/title-14/chapter-I/subchapter-G/part-117/section-117.21",
   "14CFR117.25": "https://www.ecfr.gov/current/title-14/chapter-I/subchapter-G/part-117/section-117.25",
-  "DOT-REFUND-2024": "https://www.transportation.gov/briefing-room/biden-harris-administration-announces-final-rule-requiring-automatic-refunds-airline",
+  "DOT-REFUND-2024": "https://www.law.cornell.edu/cfr/text/14/260.6",
 };
 let tz = "America/Denver";
 let tenant = "irops_WN";   // one FalkorDB graph per airline; every call names the graph it acts on
@@ -161,7 +161,7 @@ async function resetOps() {
   try {
     await api(`/api/reset?tenant=${encodeURIComponent(tenant)}`, {});
     document.querySelectorAll("#strips .strip:not(.done)").forEach((li) => markDone(li, "superseded"));
-    $("board-hint").textContent = `Every approved change in ${CARRIER(tenant)}'s graph was undone. Run the agents again for fresh proposals.`;
+    $("board-hint").textContent = `Every approved change in ${CARRIER(tenant)}'s graph was undone and rejected actions may be proposed again. Run the agents for fresh proposals.`;
   } catch (e) {
     $("board-hint").textContent = `Undo failed: ${e.message}`;
   } finally { btn.disabled = false; }
@@ -207,6 +207,7 @@ function renderImpact(s) {
     ["Passengers on them", s.pax_delayed, false],
     ["Passengers who miss a connection", s.pax_misconnecting, true],
     ["Crews pushed past their legal duty limit", s.crews_illegal, true],
+    ["Passengers owed a refund if they ask (3h+ late or cancelled)", s.pax_refund_eligible, true],
   ];
   const dl = $("impact");
   dl.replaceChildren(...items.map(([t, v, bad]) => el("div", {}, el("dt", {}, t), el("dd", { class: bad ? "bad" : "" }, fmt(v)))));
@@ -223,7 +224,7 @@ function strip(p) {
   const li = el("li", { class: "strip", "data-agent": p.agent });
   const evidence = p.evidence ? JSON.parse(p.evidence) : null;
   const actions = el("div", { class: "actions" });
-  if (p.action) {
+  if (p.action && p.status === "proposed") {
     actions.append(el("button", { class: "approve", onclick: () => decide(p, li, "approve") }, "Approve"),
       el("button", { onclick: () => decide(p, li, "reject") }, "Reject"));
   }

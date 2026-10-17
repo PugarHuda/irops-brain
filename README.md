@@ -27,12 +27,16 @@ cites the regulation it relies on, and waits for a human to approve it.
 3. **Crew agent** takes every crew the ripple pushes past its legal duty limit (14 CFR 117.13), finds a reserve on call
    at that airport, or the nearest base with one using **A\*** over the route network, and **atomically claims** it.
 4. **Passenger agent** finds broken itineraries and computes **k-shortest feasible re-routings** (seats, cancellations
-   and projected delays checked inside the query).
+   and projected delays checked inside the query). A booking with no feasible re-routing gets an executable
+   **refund** proposal (14 CFR 260.6); approving it releases the seats. The impact panel counts the passengers owed a
+   refund if they ask: last leg projected 3h+ late, or a leg cancelled.
 5. **You approve or reject** each proposal. Approval is atomic (a double click or a second operator cannot run it
    twice), writes to the graph, then reads the graph back and is only stamped APPROVED if the read-back shows the
-   intended state. "Undo all approvals" reverts every change (reserve swaps, cancellations, rebookings) exactly.
+   intended state. "Undo all approvals" reverts every change (reserve swaps, cancellations, rebookings, refunds) exactly.
 6. **Next session remembers.** Decisions and lessons are nodes. Run the scenario again and the agents recall what
-   happened last time at that airport. Proposals from an older run are superseded and can no longer be approved.
+   happened last time at that airport (a lesson learned again is counted, not duplicated). A **rejection is
+   remembered**: the next run stores the identical action as WITHHELD, citing the rejected decision, until the
+   operator resets. Proposals from an older run are superseded and can no longer be approved.
 7. **A second airline, a second graph.** Alaska Airlines' Seattle ice storm (22 Dec 2022) runs on its own graph,
    `irops_AS`, with the same agents. Tenants are isolated by FalkorDB's multi-graph, not by a filter.
 8. **Live now.** The current FAA airport status (ground stops, ground delay programs, delays, closures) and METAR
