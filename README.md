@@ -15,7 +15,7 @@ cites the regulation it relies on, and waits for a human to approve it.
 **Tracks:** 01 Agents That Act on Connected Data (primary) · 02 Agent Memory and Coordination · 03 Company Brain
 
 - Demo video: _add link_
-- Live deployment: _add link_
+- Live deployment: https://irops-brain.onrender.com (free tier: the first request after idle takes ~1 min to wake up)
 
 ## What it does
 

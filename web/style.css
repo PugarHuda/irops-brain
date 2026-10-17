@@ -120,7 +120,7 @@ pre { font: 12px/1.45 var(--code); background: white; border: 1px solid var(--li
 .compare p { margin: 0; font-size: .92rem; }
 footer { padding: 18px 28px; color: var(--ink-soft); font-size: .85rem; }
 
-@media (max-width: 900px) {
+@media (max-width: 1100px) {
   .bar { grid-template-columns: 1fr; position: static; padding: 16px; }
   .clock { text-align: left; }
   main { grid-template-columns: 1fr; }

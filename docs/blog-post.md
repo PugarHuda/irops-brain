@@ -64,4 +64,4 @@ Most of the misses are delay chains that started before our window opened.
   service.
 - We pinned v4.22.1 because A\* has not been ported to 6.x yet.
 
-The code, the data pipeline and the backtest are on GitHub: _add link_.
+The code, the data pipeline and the backtest are on GitHub: https://github.com/PugarHuda/irops-brain

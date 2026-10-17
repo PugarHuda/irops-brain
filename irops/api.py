@@ -18,6 +18,18 @@ app = FastAPI(title="IROPS Brain")
 app.mount("/static", StaticFiles(directory=ROOT / "web"), name="static")
 
 
+@app.on_event("startup")
+def ensure_graph():
+    # The FalkorDB Cloud free tier keeps no data across a restart; rebuild the graph if it came back empty.
+    try:
+        empty = not Tools(TENANT).g.ro_query("MATCH (f:Flight) RETURN f LIMIT 1").result_set
+    except Exception:  # graph key missing altogether
+        empty = True
+    if empty:
+        from irops import ingest
+        ingest.load(TENANT)
+
+
 class Run(BaseModel):
     scenario: str = "den-elliott"
 
