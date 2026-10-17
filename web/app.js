@@ -194,7 +194,8 @@ async function run() {
     }
   } catch (e) {
     $("briefing").hidden = false;
-    $("briefing").textContent = `The run failed: ${e.message}. Check that FalkorDB is running and the graph is loaded (uv run python -m irops.ingest).`;
+    $("briefing").textContent = /Another visitor/.test(e.message) ? e.message
+      : `The run failed: ${e.message}. Check that FalkorDB is running and the graph is loaded (uv run python -m irops.ingest).`;
   } finally {
     btn.disabled = false; btn.textContent = "Run the agents again";
   }

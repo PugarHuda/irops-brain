@@ -35,7 +35,11 @@ cites the regulation it relies on, and waits for a human to approve it.
    happened last time at that airport. Proposals from an older run are superseded and can no longer be approved.
 7. **A second airline, a second graph.** Alaska Airlines' Seattle ice storm (22 Dec 2022) runs on its own graph,
    `irops_AS`, with the same agents. Tenants are isolated by FalkorDB's multi-graph, not by a filter.
-8. **Bring your own agent (MCP).** The read-only tool catalogue is also served as an MCP server at `/mcp/`
+8. **Live now.** The current FAA airport status (ground stops, ground delay programs, delays, closures) and METAR
+   weather for every airport in the network are written into each airline's graph as `(:Live)-[:AT]->(:Airport)`
+   nodes (refreshed at most every 5 minutes), then matched against the route network: how many routes and daily
+   flights touch each constrained airport, and which spoke airports depend on it.
+9. **Bring your own agent (MCP).** The read-only tool catalogue is also served as an MCP server at `/mcp/`
    (streamable HTTP) and over stdio: `claude mcp add --transport http irops-brain https://irops-brain.onrender.com/mcp/`.
 
 ## Does it predict what really happened?
@@ -162,6 +166,7 @@ irops/agents.py    Ops / Crew / Pax agents coordinating through Handoff, Decisio
 irops/scenario.py  replay "what was known at time T"
 irops/llm.py       Claude over the same tools (optional) + answer validator; intent router without a key
 irops/mcp_server.py the read-only catalogue as an MCP server (stdio, and /mcp/ in the API)
+irops/live.py      FAA NAS status + aviationweather METAR -> (:Live) nodes in each airline graph
 irops/api.py       FastAPI;  web/  single-page UI (cytoscape.js)
 eval/backtest.py   prediction vs DOT LateAircraftDelay
 tests/test_irops.py invariants: crew legality, slack propagation, claim race, read-only, no routing via cancelled
@@ -210,4 +215,5 @@ the results against DOT data, and can explain every query above.
 
 - US DOT Bureau of Transportation Statistics, Reporting Carrier On-Time Performance (public domain).
 - OpenFlights airports database (Open Database License).
+- Live: FAA NAS Status (nasstatus.faa.gov) and NOAA aviationweather.gov METAR (US government, public).
 - Regulations: 14 CFR Part 117 (eCFR). Not affiliated with, or endorsed by, any airline.
