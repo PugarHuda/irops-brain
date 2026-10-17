@@ -125,7 +125,7 @@ YIELD path, pathWeight
 **Load-bearing flights: betweenness centrality** on aircraft + crew + passenger connections:
 ```cypher
 CALL algo.betweenness({nodeLabels: ['Active'], relationshipTypes: ['NEXT_LEG','CREW_NEXT','PAX_CONNECT'],
-                       samplingSize: 256, samplingSeed: 7}) YIELD node, score
+                       samplingSize: 64, samplingSeed: 7}) YIELD node, score
 ```
 
 **Airports cut off by cancellations: weakly connected components** (cancelled flights lose `:Active`):

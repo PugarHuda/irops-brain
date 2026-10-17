@@ -205,10 +205,11 @@ class Tools:
     def critical_flights(self, date="2022-12-22", top=10):
         """Load-bearing flights: betweenness over the aircraft + crew + passenger
         connection network. Delay one of these and the ripple is widest."""
+        # ponytail: 64 samples; 256 crashes the 100 MB FalkorDB Cloud free tier. Raise on a bigger instance.
         start = len(self.trace)
         rows = self._run("""
             CALL algo.betweenness({nodeLabels: ['Active'], relationshipTypes: ['NEXT_LEG', 'CREW_NEXT', 'PAX_CONNECT'],
-                                   samplingSize: 256, samplingSeed: 7})
+                                   samplingSize: 64, samplingSeed: 7})
             YIELD node, score
             WITH node, score WHERE node.date = $date AND node.dep >= $now
             RETURN node.id AS id, node.origin AS origin, node.dest AS dest, node.dep AS dep, node.pax AS pax,
