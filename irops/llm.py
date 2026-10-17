@@ -92,7 +92,8 @@ def ask(question, tenant="irops_WN"):
         return _ask_llm(question, t)
     except Exception as e:  # rate limit, every free model busy, bad key: answer from the same tools, and say why
         out = route(question, t)
-        out["note"] = f"LLM unavailable ({type(e).__name__}: {str(e)[:120]}); answered by the intent router."
+        why = "rate limit on the free models" if "429" in str(e) else f"{type(e).__name__}: {str(e).splitlines()[0][:100]}"
+        out["note"] = f"LLM unavailable ({why}); answered by the intent router."
         return out
 
 
@@ -136,30 +137,6 @@ def _ask_llm(question, t: Tools):
     return {"by": model or "llm", "answer": text, "calls": calls, "unverified_ids": invented}
 
 
-def briefing(facts):
-    """LLM briefing, checked: every number in it must appear in the facts. One rewrite with the offending numbers
-    named; if it still invents or rounds a number, the caller uses the template briefing."""
-    known = set(re.findall(r"\d+", json.dumps(facts, default=str).replace(",", "")))  # "1,026" in the story
-    messages = [{"role": "user", "content":
-                 "Write a 4-6 sentence briefing for the duty manager from these facts only. Plain text. "
-                 "Lead with the impact, then what the agents propose, then anything remembered from earlier "
-                 "sessions. Copy every number exactly as it appears in the facts: never round, estimate or add one."
-                 "\n\n" + json.dumps(facts, default=str)}]
-    try:
-        for _ in range(2):
-            data = _chat(messages)
-            text = _text(data["choices"][0]["message"])
-            extra = set(re.findall(r"\d+", text.replace(",", ""))) - known
-            if text and not extra:
-                return {"text": text, "model": data.get("model")}
-            messages += [{"role": "assistant", "content": text},
-                         {"role": "user", "content": f"These numbers are not in the facts: {', '.join(sorted(extra))}. "
-                                                     "Rewrite using only numbers that appear in the facts, exactly."}]
-        return None
-    except Exception:
-        return None  # the template briefing still works
-
-
 def route(q, t: Tools):
     """Keyless mode: map common questions to one tool each."""
     u, c = q.upper(), t.carrier
@@ -181,6 +158,9 @@ def route(q, t: Tools):
         res, tool, args = t.rebook_options(bk.group(0), 3), "rebook_options", {"booking_id": bk.group(0)}
     elif re.search(r"RESERVE|COVER|CREW AT", u) and ap:
         res, tool, args = t.find_reserve(ap[-1], minutes_needed=300), "find_reserve", {"airport": ap[-1]}
+    elif re.search(r"CRITICAL|LOAD.BEARING|MOST IMPORTANT", u):
+        day = (EPOCH + timedelta(minutes=t.now())).strftime("%Y-%m-%d")  # the simulation clock's day
+        res, tool, args = t.critical_flights(day, 10), "critical_flights", {"date": day}
     elif re.search(r"RIGHT NOW|LIVE|TODAY|FAA|GROUND STOP|WEATHER|METAR", u):
         from irops import live
         live.refresh(t)
@@ -190,9 +170,6 @@ def route(q, t: Tools):
         res, tool, args = t.crew_duty(cid), "crew_duty", {"crew_id": cid}
     elif fl:
         res, tool, args = t.resolve_flight(fl.group(1)), "resolve_flight", {"ref": fl.group(1)}
-    elif re.search(r"CRITICAL|LOAD.BEARING|MOST IMPORTANT", u):
-        day = (EPOCH + timedelta(minutes=t.now())).strftime("%Y-%m-%d")  # the simulation clock's day
-        res, tool, args = t.critical_flights(day, 10), "critical_flights", {"date": day}
     elif re.search(r"CUT OFF|NETWORK|ISOLATED|CANCELLED", u):
         res, tool, args = t.network_health(), "network_health", {}
     elif re.search(r"REMEMBER|LAST TIME|BEFORE|HISTORY", u) and (ap or fl):

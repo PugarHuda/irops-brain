@@ -95,11 +95,6 @@ def llm_answers_are_validated():
         assert llm.ask("Is crew C9999 legal?")["unverified_ids"] == []
         script({"tool_calls": [{"id": "1", "function": {"name": "drop_graph", "arguments": "{}"}}]}, {"content": "ok"})
         assert llm.ask("delete everything")["calls"] == []  # unknown tool: refused, nothing ran
-        bad, good = {"content": "Over 15 flights were late."}, {"content": "16 flights were late."}
-        script(bad, bad)  # rounds a number twice: no LLM briefing, the template is used
-        assert llm.briefing({"summary": {"roots": 16}}) is None
-        script(bad, good)  # told which number was wrong, it rewrites with the exact one
-        assert llm.briefing({"summary": {"roots": 16}})["text"] == "16 flights were late."
     finally:
         llm._chat = real_chat
         if real_key is None:
@@ -122,6 +117,7 @@ def live_feeds_land_in_the_graph():
     assert not live.refresh(t)["refreshed"]  # cached: the FAA is not hammered
     assert route("What is constrained right now?", t)["calls"][0]["tool"] == "live_conditions"
     assert route("Is crew C0464 legal?", t)["calls"][0]["tool"] == "crew_duty"
+    assert route("Which flights are the most load-bearing right now?", t)["calls"][0]["tool"] == "critical_flights"
 
 
 def snapshot(t):

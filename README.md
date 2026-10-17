@@ -178,8 +178,7 @@ Design choices, from "how to build an agent that reasons over a graph":
 - Every answer returns the traversal path, not an explanation reconstructed afterwards.
 - Outcomes are explicit: `answered`, `from_memory`, `not_in_graph` (not the same as "nothing affected"), `unknown_entity`.
 - With an LLM enabled, any flight/crew/booking id in the model's answer that no tool returned is withheld (typographic
-  hyphens are normalised first, so `2022‑12‑22‑WN…` cannot slip past), and a briefing with a number the facts do
-  not contain falls back to the template. Tools hand the model readable times, never raw minute counts.
+  hyphens are normalised first, so `2022‑12‑22‑WN…` cannot slip past). Tools hand the model readable times, never raw minute counts.
 - Memory is more nodes in the same graph. One graph per airline (`IROPS_GRAPH`), so tenants are isolated by FalkorDB's
   multi-graph, not by filters.
 - Nothing changes the operation until a human approves; every approval is re-read from the graph.
@@ -201,8 +200,9 @@ uv run python -m tests.test_irops          # "all checks passed"
 uv run uvicorn irops.api:app --port 8000   # open http://localhost:8000
 ```
 
-Optional: `export OPENROUTER_API_KEY=...` to have a free OpenRouter model write the briefing and answer free-form
-questions through the same tools. Requests use OpenRouter's `models` fallback routing over free tool-calling models
+Optional: `export OPENROUTER_API_KEY=...` to have a free OpenRouter model answer free-form questions through the same tools
+(the briefing is built from the graph numbers, so a run never waits on an LLM). The free tier allows about 50
+requests a day without account credits; past that, answers come from the intent router and say so. Requests use OpenRouter's `models` fallback routing over free tool-calling models
 (default `poolside/laguna-s-2.1:free`, then two Nemotron models; override with `OPENROUTER_MODELS`), so one busy free
 model does not fail the request. Without a key, or if every model is down, questions go through a small intent router
 and the answer says so.

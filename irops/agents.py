@@ -210,16 +210,10 @@ def reject(decision_id, tenant="irops_WN"):
     return {"ok": True}
 
 
-# -- LLM: briefing and questions over the same tools ---------------------
+# -- briefing from the graph numbers ---------------------
 def brief(sc, summ, proposals, lessons):
-    facts = {"scenario": sc["title"], "story": sc["story"], "summary": summ,
-             "proposals": [{k: p[k] for k in ("agent", "kind", "summary", "rules")} for p in proposals],
-             "status": "every proposal is waiting for human approval; nothing has been executed yet",
-             "lessons_from_earlier_sessions": [l["lesson"] for l in lessons]}  # text only: no raw minute counts
-    from irops import llm
-    out = llm.briefing(facts) if llm.available() else None
-    if out:
-        return {"by": out["model"] or "llm", "text": out["text"]}
+    # ponytail: built from the graph numbers, not by an LLM. An LLM draft cost 10-30 s inside the write lock and
+    # most of the free OpenRouter quota, and the number check rejected half the drafts. The LLM answers questions.
     kinds = {}
     for p in proposals:
         kinds[p["kind"]] = kinds.get(p["kind"], 0) + 1
