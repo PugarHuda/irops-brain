@@ -6,7 +6,7 @@ flight's *own* cause delay (weather + air traffic + carrier) and let the
 NEXT_LEG traversal propagate it. Then we compare the projected knock-on delay
 with what DOT recorded, against a 1-hop baseline (previous leg only).
 
-    uv run python -m eval.backtest
+    uv run python -m eval.backtest          # both airline graphs: irops_WN, irops_AS
 """
 from irops.db import graph
 
@@ -21,8 +21,8 @@ RETURN x.id AS id, max(d) AS predicted
 """
 
 
-def score(hops):
-    g = graph()
+def score(hops, tenant="irops_WN"):
+    g = graph(tenant)
     pred = {r[0]: r[1] for r in g.ro_query(PROPAGATE.format(hops=hops), timeout=120000).result_set}
     actual = {r[0]: r[1] for r in g.ro_query(
         "MATCH (f:Flight) WHERE NOT f.act_cancelled RETURN f.id, f.act_late_aircraft", timeout=60000).result_set}
@@ -30,7 +30,7 @@ def score(hops):
     hit = {k for k, v in pred.items() if v >= 15}
     tp = late & hit
     mae = sum(abs(pred[k] - actual[k]) for k in tp) / max(1, len(tp))
-    return {"hops": hops, "real_knock_on_flights": len(late), "predicted": len(hit), "caught": len(tp),
+    return {"airline": tenant.rsplit("_", 1)[-1], "hops": hops, "real_knock_on_flights": len(late), "predicted": len(hit), "caught": len(tp),
             "recall": round(len(tp) / max(1, len(late)), 3), "precision": round(len(tp) / max(1, len(hit)), 3),
             "mae_minutes_on_caught": round(mae, 1)}
 
@@ -38,9 +38,12 @@ def score(hops):
 if __name__ == "__main__":
     import json
     from pathlib import Path
-    results = [score(1), score(4), score(8)]
-    for r in results:
-        print(r)
+    results = []
+    for tenant in ("irops_WN", "irops_AS"):
+        mine = [score(h, tenant) for h in (1, 4, 8)]
+        for r in mine:
+            print(r)
+        # self-check: multi-hop traversal must catch strictly more real knock-on delays than 1 hop
+        assert mine[2]["caught"] > mine[0]["caught"], mine
+        results += mine
     Path(__file__).with_name("results.json").write_text(json.dumps({"results": results}, indent=1))
-    # self-check: multi-hop traversal must catch strictly more real knock-on delays than 1 hop
-    assert results[2]["caught"] > results[0]["caught"], results

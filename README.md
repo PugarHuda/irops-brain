@@ -28,9 +28,15 @@ cites the regulation it relies on, and waits for a human to approve it.
    at that airport, or the nearest base with one using **A\*** over the route network, and **atomically claims** it.
 4. **Passenger agent** finds broken itineraries and computes **k-shortest feasible re-routings** (seats, cancellations
    and projected delays checked inside the query).
-5. **You approve or reject** each proposal. Approval writes to the graph and the change is read back as verification.
+5. **You approve or reject** each proposal. Approval is atomic (a double click or a second operator cannot run it
+   twice), writes to the graph, then reads the graph back and is only stamped APPROVED if the read-back shows the
+   intended state. "Undo all approvals" reverts every change (reserve swaps, cancellations, rebookings) exactly.
 6. **Next session remembers.** Decisions and lessons are nodes. Run the scenario again and the agents recall what
-   happened last time at that airport.
+   happened last time at that airport. Proposals from an older run are superseded and can no longer be approved.
+7. **A second airline, a second graph.** Alaska Airlines' Seattle ice storm (22 Dec 2022) runs on its own graph,
+   `irops_AS`, with the same agents. Tenants are isolated by FalkorDB's multi-graph, not by a filter.
+8. **Bring your own agent (MCP).** The read-only tool catalogue is also served as an MCP server at `/mcp/`
+   (streamable HTTP) and over stdio: `claude mcp add --transport http irops-brain https://irops-brain.onrender.com/mcp/`.
 
 ## Does it predict what really happened?
 
@@ -38,13 +44,15 @@ US DOT records, for every flight, how many minutes of delay came from the aircra
 We seed the graph only with each flight's *own* weather/air-traffic/carrier delay and let the `NEXT_LEG` traversal
 propagate it. `uv run python -m eval.backtest` on 21-23 Dec 2022 (11,754 flights):
 
-| Traversal | Real knock-on delays | Caught | Recall | Precision | Mean error |
-|---|---|---|---|---|---|
-| 1 hop (previous leg only) | 3,087 | 1,211 | 39% | 95% | 33.7 min |
-| 4 hops | 3,087 | 1,503 | 49% | 95% | 30.2 min |
-| **8 hops** | 3,087 | **1,505** | **49%** | **95%** | **30.2 min** |
+| Airline | Traversal | Real knock-on delays | Caught | Recall | Precision | Mean error |
+|---|---|---|---|---|---|---|
+| Southwest | 1 hop (previous leg only) | 3,087 | 1,211 | 39% | 95% | 33.7 min |
+| Southwest | **8 hops** | 3,087 | **1,505** | **49%** | **95%** | **30.2 min** |
+| Alaska | 1 hop (previous leg only) | 314 | 96 | 31% | 85% | 23.9 min |
+| Alaska | **8 hops** | 314 | **119** | **38%** | **87%** | 26.6 min |
 
-Multi-hop traversal catches 24% more real knock-on delays than looking at the previous leg, at the same precision.
+On both airlines, multi-hop traversal catches 24% more real knock-on delays than looking at the previous leg, at the
+same or better precision.
 Recall is capped mainly by delay chains that started before 21 Dec (outside the loaded window) and flights with no tail
 number in the DOT file.
 
@@ -67,7 +75,9 @@ number in the DOT file.
 (Crew)-[:CLAIMED_FOR {by}]->(Flight)        (Handoff)-[:ABOUT]->(Flight)   (Lesson)-[:ABOUT]->(Airport)
 ```
 
-About 47,000 nodes and 410,000 relationships; the full ingest takes ~14 seconds. Times are minutes since
+Southwest: about 47,000 nodes and 410,000 relationships (~14 s to ingest). Alaska: about 6,000 nodes and 51,000
+relationships. Unique constraints on Flight/Crew/Booking ids and Airport codes; a full-text index on airport names
+resolves "Midway" or "Seattle" to a code. Times are minutes since
 2022-12-21 00:00 UTC, converted from local schedule times with each airport's time zone.
 
 **Real vs synthetic.** Flights, tails, schedules and outcomes are real public data (US DOT BTS On-Time Performance,
@@ -108,9 +118,9 @@ WHERE s.dep + s.delay >= $ready AND s.seats - s.pax >= $pax
 WITH s ORDER BY CASE WHEN s.dest = $dest THEN 0 ELSE 1 END, s.dep LIMIT 16
 MATCH (t:Airport {code: $dest})
 CALL algo.SPpaths({sourceNode: s, targetNode: t, relTypes: ['CONN', 'ARRIVES_AT'],
-                   weightProp: 'w', maxLen: 3, pathCount: 2}) YIELD path, pathWeight
+                   weightProp: 'w', maxLen: 3, pathCount: 4}) YIELD path, pathWeight
 WITH path, [n IN nodes(path) WHERE n:Flight] AS fl
-WHERE all(n IN fl WHERE n.seats - n.pax >= $pax)
+WHERE all(n IN fl WHERE n:Active AND n.seats - n.pax >= $pax)   // cancelled flights keep their edges, the query skips them
   AND all(i IN range(0, size(fl) - 2) WHERE fl[i].arr + fl[i].delay + 35 <= fl[i+1].dep + fl[i+1].delay)
 RETURN [n IN fl | n.id], fl[size(fl)-1].arr + fl[size(fl)-1].delay AS arrives ORDER BY arrives LIMIT $k
 ```
@@ -151,9 +161,11 @@ irops/tools.py     the fixed tool catalogue: Cypher, argument resolution, read-o
 irops/agents.py    Ops / Crew / Pax agents coordinating through Handoff, Decision, CLAIMED_FOR, Lesson nodes
 irops/scenario.py  replay "what was known at time T"
 irops/llm.py       Claude over the same tools (optional) + answer validator; intent router without a key
+irops/mcp_server.py the read-only catalogue as an MCP server (stdio, and /mcp/ in the API)
 irops/api.py       FastAPI;  web/  single-page UI (cytoscape.js)
 eval/backtest.py   prediction vs DOT LateAircraftDelay
-tests/test_irops.py invariants: crew legality, slack propagation, claim race, read-only, no routing via cancelled flights
+tests/test_irops.py invariants: crew legality, slack propagation, claim race, read-only, no routing via cancelled
+                   flights, atomic + verified + exactly reversible approvals, tenant isolation, MCP, constraints
 ```
 
 Design choices, from "how to build an agent that reasons over a graph":
@@ -175,7 +187,8 @@ mkdir -p data/raw
 curl -o data/raw/bts_2022_12.zip https://transtats.bts.gov/PREZIP/On_Time_Reporting_Carrier_On_Time_Performance_1987_present_2022_12.zip
 curl -o data/raw/airports.dat https://raw.githubusercontent.com/jpatokal/openflights/master/data/airports.dat
 uv sync
-uv run python -m irops.ingest              # ~14 s
+uv run python -m irops.ingest              # Southwest graph, ~14 s
+uv run python -m irops.ingest irops_AS     # Alaska graph
 uv run python -m eval.backtest             # writes eval/results.json
 uv run python -m tests.test_irops          # "all checks passed"
 uv run uvicorn irops.api:app --port 8000   # open http://localhost:8000

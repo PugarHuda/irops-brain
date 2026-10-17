@@ -1,11 +1,12 @@
 """Build the IROPS graph from public US DOT on-time data.
 
-Real (public): every Southwest flight, its tail number, scheduled times and what
+Real (public): every flight of one airline (Southwest by default), its tail number, scheduled times and what
 actually happened (delays, cancellations, delay causes) for 21-23 Dec 2022.
 Synthetic (seeded, deterministic): cockpit crews, reserve crews and connecting
 passenger bookings, generated on top of the real schedule. No private data.
 
-    uv run python -m irops.ingest            # loads graph "irops_WN"
+    uv run python -m irops.ingest            # loads graph "irops_WN" (Southwest)
+    uv run python -m irops.ingest irops_AS   # a second, isolated tenant: Alaska Airlines
 """
 import csv, io, random, sys, zipfile
 from collections import defaultdict
@@ -23,8 +24,14 @@ MIN_CREW_CONN = 30   # minutes a crew needs to change aircraft
 MIN_PAX_CONN = 35    # minimum connection time for passengers
 CONN_PENALTY = 45    # rebooking cost of one extra connection, in minutes
 SEATS = 175         # 737-800; ponytail: one cabin size, per-tail seat maps if it matters
-# ponytail: plausible synthetic crew bases, not Southwest's real roster.
-BASES = ["ATL", "BWI", "DAL", "DEN", "HOU", "LAS", "MCO", "MDW", "OAK", "PHX", "BNA", "LAX"]
+# ponytail: plausible synthetic crew bases per airline, not the real rosters.
+BASES = {"WN": ["ATL", "BWI", "DAL", "DEN", "HOU", "LAS", "MCO", "MDW", "OAK", "PHX", "BNA", "LAX"],
+         "AS": ["SEA", "PDX", "ANC", "SFO", "LAX", "SAN"]}
+
+
+def carrier_of(tenant):
+    """Graph name -> airline code: one airline per graph, e.g. irops_AS -> AS."""
+    return tenant.rsplit("_", 1)[-1].upper()
 SEED = 22
 
 
@@ -63,12 +70,12 @@ def read_flights(carrier="WN"):
         arr = minutes(local(r["CRSArrTime"], r["Dest"]))
         while arr <= dep:
             arr += 1440
-        fid = f'{r["FlightDate"]}-WN{r["Flight_Number_Reporting_Airline"]}-{r["Origin"]}'
+        fid = f'{r["FlightDate"]}-{carrier}{r["Flight_Number_Reporting_Airline"]}-{r["Origin"]}'
         if fid in seen:
             fid += "-" + r["Tail_Number"]
         seen.add(fid)
         flights.append({
-            "id": fid, "fno": "WN" + r["Flight_Number_Reporting_Airline"], "date": r["FlightDate"],
+            "id": fid, "fno": carrier + r["Flight_Number_Reporting_Airline"], "date": r["FlightDate"],
             "origin": r["Origin"], "dest": r["Dest"], "tail": r["Tail_Number"],
             "dep": dep, "arr": arr, "block": arr - dep, "seats": SEATS,
             # ground truth, never shown to the agents; used by eval/backtest.py
@@ -102,7 +109,7 @@ def fdp_limit(start_local_hour, segments):
     return int((limit - 0.5 * max(0, segments - 4)) * 60)
 
 
-def build_crews(flights, airports, rng):
+def build_crews(flights, airports, rng, bases):
     """Greedy, legal-by-construction cockpit pairings over the real schedule.
 
     ponytail: greedy cover, not an optimiser; crews stay with their aircraft
@@ -130,7 +137,7 @@ def build_crews(flights, airports, rng):
             if cands:
                 pick = min(cands, key=lambda c: c["free_at"])
         if pick is None:
-            pick = {"id": f"C{len(crews) + 1:04d}", "base": f["origin"] if f["origin"] in BASES else rng.choice(BASES),
+            pick = {"id": f"C{len(crews) + 1:04d}", "base": f["origin"] if f["origin"] in bases else rng.choice(bases),
                     "loc": f["origin"], "free_at": -10**6, "duty_start": None, "last_arr": -10**6,
                     "legs": 0, "start_hour": 0, "reserve": False}
             crews.append(pick)
@@ -162,7 +169,7 @@ def build_crews(flights, airports, rng):
                 crew_next.append({"a": a, "b": b, "crew": crew, "slack": max(0, gap - MIN_CREW_CONN)})
     # reserves: ~6% of the line crews per base per day, on call 05:00-17:00 local
     reserves = []
-    for base in BASES:
+    for base in bases:
         n = max(2, sum(c["base"] == base for c in crews) * 6 // 100)
         for d, day in enumerate(DAYS):
             for i in range(n):
@@ -222,9 +229,10 @@ def batched(query, rows, g, size=2000):
 
 def load(name="irops_WN"):
     rng = random.Random(SEED)
-    flights, airports = read_flights()
+    carrier = carrier_of(name)
+    flights, airports = read_flights(carrier)
     legs = aircraft_legs(flights)
-    crews, assign, crew_next = build_crews(flights, airports, rng)
+    crews, assign, crew_next = build_crews(flights, airports, rng, BASES[carrier])
     bookings, segs = build_bookings(flights, rng)
     fmap = {f["id"]: f for f in flights}
     # passenger-feasible connections at the same airport, for rebooking (time-expanded network)
@@ -253,6 +261,11 @@ def load(name="irops_WN"):
                         ("Booking", "id"), ("Rule", "id"), ("Agent", "name")]:
         g.query(f"CREATE INDEX FOR (n:{label}) ON (n.{prop})")
     g.query("CREATE INDEX FOR (n:Flight) ON (n.dep)")
+    # ids are identities: the database itself refuses a second Flight/Crew/Booking with the same id
+    for label, prop in [("Flight", "id"), ("Crew", "id"), ("Booking", "id"), ("Airport", "code")]:
+        g.create_node_unique_constraint(label, prop)
+    # "Denver", "Midway", "Seattle-Tacoma": names people type resolve to airport codes
+    g.create_node_fulltext_index("Airport", "name", "city")
     batched("UNWIND $rows AS r MERGE (a:Airport {code: r.code}) SET a += r", list(airports.values()), g)
     # :Active = not cancelled. Graph algorithms filter by label, so cancelling a flight removes it.
     batched("UNWIND $rows AS r MERGE (f:Flight {id: r.id}) SET f += r, f:Active, f.status = 'scheduled', f.delay = 0", flights, g)
@@ -267,12 +280,12 @@ def load(name="irops_WN"):
                MERGE (c)-[e:ASSIGNED]->(f) SET e.duty_start = r.duty_start, e.fdp_limit = r.fdp_limit""", assign, g)
     batched("UNWIND $rows AS r MATCH (a:Flight {id: r.a}), (b:Flight {id: r.b}) MERGE (a)-[e:CREW_NEXT {crew: r.crew}]->(b) SET e.slack = r.slack", crew_next, g)
     batched("UNWIND $rows AS r MERGE (b:Booking {id: r.id}) SET b += r, b.status = 'confirmed'", bookings, g)
-    batched("UNWIND $rows AS r MATCH (b:Booking {id: r.b}), (f:Flight {id: r.f}) MERGE (b)-[:SEGMENT {seq: r.seq}]->(f)", segs, g, 4000)
+    batched("UNWIND $rows AS r MATCH (b:Booking {id: r.b}), (f:Flight {id: r.f}) MERGE (b)-[:SEGMENT {seq: r.seq}]->(f)", segs, g, 1500)
     # aggregate passenger connections from bookings, in the graph
     g.query("""MATCH (b:Booking)-[:SEGMENT {seq: 1}]->(a:Flight), (b)-[:SEGMENT {seq: 2}]->(d:Flight)
                WITH a, d, sum(b.pax) AS pax
                MERGE (a)-[e:PAX_CONNECT]->(d) SET e.pax = pax, e.slack = d.dep - a.arr - $mct""", {"mct": MIN_PAX_CONN}, timeout=120000)
-    batched("UNWIND $rows AS r MATCH (a:Flight {id: r.a}), (b:Flight {id: r.b}) CREATE (a)-[:CONN {w: r.w}]->(b)", conns, g, 5000)
+    batched("UNWIND $rows AS r MATCH (a:Flight {id: r.a}), (b:Flight {id: r.b}) CREATE (a)-[:CONN {w: r.w}]->(b)", conns, g, 1500)
     batched("""UNWIND $rows AS r MATCH (o:Airport {code: r.o}), (d:Airport {code: r.d})
                MERGE (o)-[e:ROUTE]->(d) SET e.block = r.block, e.daily = r.daily""", routes, g)
     batched("UNWIND $rows AS r MERGE (x:Rule {id: r.id}) SET x += r", RULES, g)

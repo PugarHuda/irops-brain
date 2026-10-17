@@ -148,8 +148,9 @@ def ops_followup(s: Session):
         t.close_handoff(h["handoff"])
 
 
-def run(scenario="den-elliott", tenant="irops_WN"):
-    t = Tools(tenant)
+def run(scenario="den-elliott", tenant=None):
+    from irops.scenario import SCENARIOS
+    t = Tools(tenant or SCENARIOS[scenario]["tenant"])
     sc = load_scenario(scenario, t)
     s = Session(t, sc)
     ops = ops_agent(s)
@@ -164,7 +165,7 @@ def run(scenario="den-elliott", tenant="irops_WN"):
                 [ap], s.id)
     proposals = t.decisions(session=s.id)
     briefing = brief(sc, summ, proposals, ops["lessons"])
-    return {"session": s.id, "scenario": {k: v for k, v in sc.items() if k not in ("roots", "cancelled")},
+    return {"session": s.id, "tenant": t.tenant, "scenario": {k: v for k, v in sc.items() if k not in ("roots", "cancelled")},
             "known": {"delayed": len(sc["roots"]), "cancelled": len(sc["cancelled"])},
             "summary": summ, "lessons_recalled": ops["lessons"], "steps": s.steps, "proposals": proposals,
             "briefing": briefing}
@@ -173,34 +174,39 @@ def run(scenario="den-elliott", tenant="irops_WN"):
 # -- human approval: the only path that changes the operation --------------
 def approve(decision_id, tenant="irops_WN"):
     t = Tools(tenant)
-    d = next((x for x in t.decisions() if x["id"] == decision_id), None)
-    if not d or d["status"] != "proposed" or not d["action"]:
-        return {"ok": False, "reason": "not an open proposal"}
+    d = t.take_decision(decision_id)  # atomic: a double click or a second approver cannot run it twice
+    if not d:
+        return {"ok": False, "reason": "not an open proposal (already decided, or superseded by a newer run)"}
     act = json.loads(d["action"])
     op = act["op"]
-    if op == "cancel_with_return":
-        res = t.cancel_with_return(act["flight"], reason=d["summary"])
-        check = t.disrupted_bookings(limit=50)
-    elif op == "publish_delays":
-        for x in act["delays"]:
-            t.set_delay(x["flight"], x["delay"])
-        res, check = {"outcome": "answered", "rows": act["delays"]}, t.network_health()
-    elif op == "assign_reserve":
-        res = t.assign_reserve(act["reserve"], act["flight"], act["replaces"])
-        check = t.crew_duty(act["reserve"])
-    elif op == "apply_rebook":
-        res = t.apply_rebook(act["booking"], act["flights"])
-        check = t.rebook_options(act["booking"], k=1)  # re-read the booking from the graph
-    else:
-        return {"ok": False, "reason": f"unknown op {op}"}
-    ok = res.get("outcome") == "answered"
-    t.set_decision(decision_id, "approved" if ok else "failed", json.dumps(res.get("rows", []))[:500])
-    return {"ok": ok, "result": res, "verification": {"outcome": check.get("outcome"), "rows": check.get("rows", [])[:10],
-                                                      "cypher": check.get("cypher", [])}}
+    try:
+        if op == "cancel_with_return":
+            res = t.cancel_with_return(act["flight"], reason=d["summary"])
+        elif op == "publish_delays":
+            res = {"outcome": "answered", "rows": [t.set_delay(x["flight"], x["delay"])["rows"][0] for x in act["delays"]]}
+        elif op == "assign_reserve":
+            res = t.assign_reserve(act["reserve"], act["flight"], act["replaces"])
+        elif op == "apply_rebook":
+            res = t.apply_rebook(act["booking"], act["flights"])
+        else:
+            res = {"outcome": "rejected", "rows": [], "reason": f"unknown op {op}"}
+        check = t.read_back(op, act)
+        # approved only if the write happened AND reading the graph back shows the intended state
+        ok = res.get("outcome") == "answered" and check["outcome"] == "answered"
+    except Exception as e:
+        t.set_decision(decision_id, "failed", f"{type(e).__name__}: {e}"[:500])
+        return {"ok": False, "reason": f"{type(e).__name__}: {e}"}
+    t.set_decision(decision_id, "approved" if ok else "failed", json.dumps(res.get("rows", []), default=str)[:500])
+    return {"ok": ok, "reason": None if ok else (res.get("reason") or check.get("reason") or "the graph refused this change"),
+            "result": res, "verification": {"outcome": check["outcome"], "rows": check["rows"][:10],
+                                            "cypher": check["cypher"], "reason": check.get("reason")}}
 
 
 def reject(decision_id, tenant="irops_WN"):
-    Tools(tenant).set_decision(decision_id, "rejected")
+    t = Tools(tenant)
+    if not t.take_decision(decision_id):
+        return {"ok": False, "reason": "not an open proposal (already decided, or superseded by a newer run)"}
+    t.set_decision(decision_id, "rejected")
     return {"ok": True}
 
 
@@ -217,8 +223,8 @@ def brief(sc, summ, proposals, lessons):
     for p in proposals:
         kinds[p["kind"]] = kinds.get(p["kind"], 0) + 1
     lines = [f"{sc['title']}. {summ.get('roots', 0)} flights already late are projected to delay "
-             f"{summ.get('downstream_flights', 0)} more ({summ.get('pax_delayed', 0)} passengers), break "
-             f"{int(summ.get('pax_misconnecting', 0))} passenger connections and push {summ.get('crews_illegal', 0)} "
+             f"{summ.get('downstream_flights', 0)} more ({summ.get('pax_delayed', 0):,} passengers), break "
+             f"{int(summ.get('pax_misconnecting', 0)):,} passenger connections and push {summ.get('crews_illegal', 0)} "
              "crews past their legal duty limit."]
     if kinds:
         lines.append("Proposed: " + ", ".join(f"{v} x {k.replace('_', ' ')}" for k, v in kinds.items()) +

@@ -11,12 +11,20 @@ SCENARIOS = {
         "title": "Winter Storm Elliott hits Denver",
         "story": "Thu 22 Dec 2022, 08:00 in Denver. -24°F, de-icing backlog. The first three hours of "
                  "departures are already late or cancelled. Southwest went on to cancel 1,026 flights that day.",
-        "airports": ["DEN"], "tz": "America/Denver", "date": "2022-12-22", "from_min": 1440 + 12 * 60, "clock": 1440 + 15 * 60,
+        "tenant": "irops_WN", "airports": ["DEN"], "tz": "America/Denver", "date": "2022-12-22", "from_min": 1440 + 12 * 60, "clock": 1440 + 15 * 60,
     },
     "mdw-elliott": {
         "title": "Chicago Midway freezes",
         "story": "Thu 22 Dec 2022, 09:00 in Chicago. Blizzard conditions at MDW, ground delays building.",
-        "airports": ["MDW"], "tz": "America/Chicago", "date": "2022-12-22", "from_min": 1440 + 12 * 60, "clock": 1440 + 15 * 60,
+        "tenant": "irops_WN", "airports": ["MDW"], "tz": "America/Chicago", "date": "2022-12-22", "from_min": 1440 + 12 * 60, "clock": 1440 + 15 * 60,
+    },
+    # a different airline in its own graph: the same agents, tenant isolation by FalkorDB multi-graph
+    "sea-ice": {
+        "title": "Ice storm reaches Seattle (Alaska Airlines)",
+        "story": "Thu 22 Dec 2022, 19:00 in Seattle. Freezing rain is moving in and the evening bank is running late. "
+                 "Next day Alaska Airlines cancelled 176 departures from SEA. This runs on a separate graph, irops_AS.",
+        "tenant": "irops_AS", "airports": ["SEA"], "tz": "America/Los_Angeles", "date": "2022-12-23",
+        "from_min": 2880 - 6 * 60, "clock": 2880 + 3 * 60,
     },
 }
 
@@ -41,7 +49,6 @@ def load_scenario(name, tools: Tools):
       {"r": roots}, write=True)
     g("""UNWIND $ids AS i MATCH (f:Flight {id: i}) REMOVE f:Active SET f.status = 'cancelled', f.cancel_reason = 'weather'""",
       {"ids": cancelled}, write=True)
-    g("UNWIND $ids AS i MATCH (f:Flight {id: i})-[c:CONN]-() DELETE c", {"ids": cancelled}, write=True)
     return {"name": name, **s, "roots": roots, "cancelled": cancelled}
 
 

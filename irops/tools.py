@@ -18,7 +18,7 @@ from falkordb.node import Node
 from falkordb.path import Path
 
 from irops.db import graph
-from irops.ingest import EPOCH, MIN_PAX_CONN, fdp_limit
+from irops.ingest import EPOCH, MIN_PAX_CONN, carrier_of, fdp_limit
 
 TIMEOUT_MS = 8000
 TURN_PAD = 15  # FDP ends 15 min after block-in
@@ -58,6 +58,7 @@ class Tools:
 
     def __init__(self, tenant="irops_WN"):
         self.tenant = tenant
+        self.carrier = carrier_of(tenant)
         self.g = graph(tenant)
         self.trace = []  # every query this toolbox ran, for the UI
 
@@ -83,26 +84,39 @@ class Tools:
 
     # -- resolution: never trust a name the model typed ---------------------
     def resolve_flight(self, ref):
-        """Accepts a full flight id, or 'WN2262' optionally with a date and/or origin."""
+        """Accepts a full flight id, or a flight number like 'WN2262' optionally with a date and/or origin."""
         start = len(self.trace)
         rows = self._run("MATCH (f:Flight {id: $ref}) RETURN f.id AS id, f.fno AS fno, f.origin AS origin, "
                          "f.dest AS dest, f.dep AS dep, f.status AS status", {"ref": ref})
         if not rows:
-            m = re.search(r"(WN)?\s*(\d{1,4})", ref.upper())
+            u = ref.upper()
+            m = re.search(rf"(?:{self.carrier})?\s*(\d{{1,4}})\b", re.sub(r"2022-12-\d\d", " ", u))
             date = re.search(r"2022-12-\d\d", ref)
-            ap = re.findall(r"\b([A-Z]{3})\b", ref.upper().replace("WN", ""))
+            ap = re.findall(r"\b([A-Z]{3})\b", u.replace(self.carrier, " "))
             if m:
                 rows = self._run("""MATCH (f:Flight {fno: $fno})
                     WHERE ($date IS NULL OR f.date = $date) AND ($ap IS NULL OR f.origin = $ap)
                     RETURN f.id AS id, f.fno AS fno, f.origin AS origin, f.dest AS dest, f.dep AS dep, f.status AS status
                     ORDER BY f.dep LIMIT 6""",
-                                 {"fno": "WN" + m.group(2), "date": date.group(0) if date else None,
+                                 {"fno": self.carrier + m.group(1), "date": date.group(0) if date else None,
                                   "ap": ap[0] if ap else None})
         return self._result("answered" if rows else "unknown_entity", rows, start=start)
 
     def _one_flight(self, ref):
         r = self.resolve_flight(ref)
         return r["rows"][0]["id"] if len(r["rows"]) == 1 else None, r
+
+    def resolve_airport(self, name):
+        """An airport code from a code or a name/city ('Denver', 'Midway'), via the full-text index."""
+        start = len(self.trace)
+        rows = self._run("MATCH (a:Airport {code: $c}) RETURN a.code AS code, a.name AS name, a.city AS city",
+                         {"c": (name or "").strip().upper()})
+        terms = " ".join(w + "*" for w in re.findall(r"[A-Za-z]{3,}", name or ""))  # prefix match per word
+        if not rows and terms:
+            rows = self._run("""CALL db.idx.fulltext.queryNodes('Airport', $q) YIELD node, score
+                RETURN node.code AS code, node.name AS name, node.city AS city, score ORDER BY score DESC LIMIT 5""",
+                             {"q": terms})
+        return self._result("answered" if rows else "unknown_entity", rows, start=start)
 
     def _airport(self, code):
         return bool(self._run("MATCH (a:Airport {code: $c}) RETURN a.code AS c", {"c": (code or "").upper()}))
@@ -146,7 +160,7 @@ class Tools:
         # crews pushed past their flight-duty-period limit (14 CFR 117.13)
         fdp = self._run("""
             UNWIND $imp AS i
-            MATCH (c:Crew)-[a:ASSIGNED]->(f:Flight:Active {id: i.id})
+            MATCH (c:Crew)-[a:ASSIGNED]->(f:Flight:Active {id: i.id}) WHERE a.relieved_by IS NULL
             WITH c, f, a, f.arr + i.delay + $pad - a.duty_start - a.fdp_limit AS over
             WHERE over > 0
             MATCH (r:Rule {id: '14CFR117.13'})
@@ -164,14 +178,15 @@ class Tools:
         """A crew's assigned legs with projected times against its FDP limit."""
         start = len(self.trace)
         rows = self._run("""
-            MATCH (c:Crew {id: $id})-[a:ASSIGNED]->(f:Flight)
+            MATCH (c:Crew {id: $id})-[a:ASSIGNED]->(f:Flight) WHERE a.relieved_by IS NULL
             RETURN c.base AS base, f.id AS flight, f.origin AS origin, f.dest AS dest, f.dep AS dep,
                    f.arr AS arr, f.delay AS delay, f.status AS status, a.duty_start AS duty_start,
                    a.fdp_limit AS fdp_limit, f.arr + f.delay + $pad - a.duty_start AS fdp_used
             ORDER BY f.dep""", {"id": crew_id, "pad": TURN_PAD})
         if not rows:
             return self._result("unknown_entity", start=start)
-        p = self._run("MATCH p = (:Crew {id: $id})-[:ASSIGNED]->(:Flight) RETURN p", {"id": crew_id})
+        p = self._run("MATCH p = (:Crew {id: $id})-[a:ASSIGNED]->(:Flight) WHERE a.relieved_by IS NULL RETURN p",
+                      {"id": crew_id})
         return self._result("answered", rows, [x["p"] for x in p], start)
 
     def find_reserve(self, airport, need_at=None, minutes_needed=360):
@@ -184,11 +199,11 @@ class Tools:
         t = int(need_at if need_at is not None else self.now())
         free = """(r:Crew {reserve: true})-[:BASED_AT]->(b:Airport)
                   WHERE r.on_call_from <= $t AND $t + $need <= r.on_call_to + 120 AND NOT (r)-[:CLAIMED_FOR]->()"""
-        local = self._run(f"""MATCH {free} AND b.code = $ap
-            RETURN r.id AS reserve, b.code AS base, r.on_call_to AS on_call_to, 0 AS deadhead_minutes
+        local = self._run(f"""MATCH p = {free} AND b.code = $ap
+            RETURN r.id AS reserve, b.code AS base, r.on_call_to AS on_call_to, 0 AS deadhead_minutes, p AS path
             ORDER BY r.id LIMIT 5""", {"t": t, "need": int(minutes_needed), "ap": airport})
         if local:
-            return self._result("answered", local, start=start)
+            return self._result("answered", local, [r.pop("path") for r in local], start)
         rows = self._run(f"""
             MATCH {free} AND b.code <> $ap
             WITH b, collect(r.id)[0] AS reserve
@@ -256,10 +271,10 @@ class Tools:
             WITH s ORDER BY CASE WHEN s.dest = $dest THEN 0 ELSE 1 END, s.dep LIMIT 16
             MATCH (t:Airport {code: $dest})
             CALL algo.SPpaths({sourceNode: s, targetNode: t, relTypes: ['CONN', 'ARRIVES_AT'],
-                               weightProp: 'w', maxLen: 3, pathCount: 2})
+                               weightProp: 'w', maxLen: 3, pathCount: 4})
             YIELD path, pathWeight
             WITH path, pathWeight, [n IN nodes(path) WHERE n:Flight] AS fl
-            WHERE all(n IN fl WHERE n.seats - n.pax >= $pax)
+            WHERE all(n IN fl WHERE n:Active AND n.seats - n.pax >= $pax)
               AND all(i IN range(0, size(fl) - 2) WHERE fl[i].arr + fl[i].delay + $mct <= fl[i + 1].dep + fl[i + 1].delay)
             WITH path, fl, fl[size(fl) - 1] AS l
             RETURN [n IN fl | n.id] AS flights, size(fl) - 1 AS connections,
@@ -362,6 +377,12 @@ class Tools:
                    collect(DISTINCT r.id) AS rules, collect(DISTINCT coalesce(x.id, x.code)) AS about
             ORDER BY d.at, d.kind""", {"s": session, "st": status})
 
+    def take_decision(self, decision_id):
+        """Atomically move an open proposal to 'executing'; a second approver gets nothing."""
+        r = self._run("""MATCH (d:Decision {id: $id, status: 'proposed'}) WHERE d.action IS NOT NULL
+            SET d.status = 'executing' RETURN d.action AS action, d.summary AS summary""", {"id": decision_id}, write=True)
+        return r[0] if r else None
+
     def set_decision(self, decision_id, status, outcome=""):
         self._run("MATCH (d:Decision {id: $id}) SET d.status = $st, d.outcome = $o",
                   {"id": decision_id, "st": status, "o": outcome}, write=True)
@@ -404,8 +425,8 @@ class Tools:
 
     def cancel_with_return(self, flight_ref, agent="ops", reason=""):
         """Cancel a flight and the aircraft's return leg, so the tail ends where it began
-        (the standard IROPS containment move). Cancelled flights lose :Active and their
-        passenger connections, so every algorithm stops routing through them."""
+        (the standard IROPS containment move). Cancelled flights lose :Active, so every
+        algorithm and query stops routing through them; reset_ops can restore them."""
         start = len(self.trace)
         fid, _ = self._one_flight(flight_ref)
         if not fid:
@@ -417,7 +438,6 @@ class Tools:
         ids = [x for x in (pair[0]["out"], pair[0]["back"]) if x]
         self._run("""UNWIND $ids AS i MATCH (f:Flight {id: i})
             REMOVE f:Active SET f.status = 'cancelled', f.cancel_reason = $why""", {"ids": ids, "why": reason}, write=True)
-        self._run("""UNWIND $ids AS i MATCH (f:Flight {id: i})-[c:CONN]-() DELETE c""", {"ids": ids}, write=True)
         hit = self._run("""UNWIND $ids AS i MATCH (b:Booking)-[:SEGMENT]->(:Flight {id: i})
             RETURN count(DISTINCT b) AS bookings, toInteger(sum(b.pax)) AS pax""", {"ids": ids})
         return self._result("answered", [{"cancelled": ids, **hit[0]}], start=start)
@@ -430,10 +450,19 @@ class Tools:
         if not f:
             return self._result("unknown_entity", start=start)
         hour = int(hhmm(self.now(), self._tz(f[0]["o"]))[-5:-3])
+        # The relieved crew's inbound CREW_NEXT stops carrying delay: it is retyped to CREW_NEXT_RELIEVED
+        # (filtering every variable-length path instead costs ~90x) and kept, so reset_ops can restore it.
         rows = self._run("""
             MATCH (r:Crew {id: $r})-[:CLAIMED_FOR]->(f:Flight {id: $f})
+            WHERE NOT (r)-[:ASSIGNED]->(f)
             OPTIONAL MATCH (:Crew {id: $old})-[a:ASSIGNED]->(f)
-            DELETE a
+            SET a.relieved_by = $r
+            WITH DISTINCT r, f
+            OPTIONAL MATCH (pv:Flight)-[cn:CREW_NEXT {crew: $old}]->(f)
+            FOREACH (_ IN CASE WHEN cn IS NULL THEN [] ELSE [1] END |
+                CREATE (pv)-[:CREW_NEXT_RELIEVED {crew: cn.crew, slack: cn.slack, relieved_by: $r}]->(f))
+            DELETE cn
+            WITH DISTINCT r, f
             CREATE (r)-[:ASSIGNED {duty_start: $now, fdp_limit: $limit, replaced: $old}]->(f)
             RETURN r.id AS reserve, f.id AS flight""",
                          {"r": reserve_id, "f": flight_id, "old": replaces, "now": self.now(),
@@ -444,7 +473,10 @@ class Tools:
         """Move a booking onto new flights; seats are re-checked inside the write."""
         start = len(self.trace)
         rows = self._run("""
-            MATCH (b:Booking {id: $id})
+            MATCH (b:Booking {id: $id})-[s0:SEGMENT]->(o0:Flight)
+            WITH b, s0, o0 ORDER BY s0.seq
+            WITH b, collect(o0.id) AS was
+            SET b.orig = coalesce(b.orig, was)
             WITH b, [i IN $flights | i] AS want
             MATCH (f:Flight:Active) WHERE f.id IN want AND f.seats - f.pax >= b.pax
             WITH b, want, collect(f) AS fs WHERE size(fs) = size(want)
@@ -459,12 +491,55 @@ class Tools:
             RETURN DISTINCT b.id AS booking""", {"id": booking_id, "flights": list(flights)}, write=True)
         return self._result("answered" if rows else "rejected", rows, start=start)
 
+    def read_back(self, op, act):
+        """After an approved write: read the graph again and check it now holds the intended state."""
+        start = len(self.trace)
+        if op == "cancel_with_return":
+            rows = self._run("""MATCH (f:Flight {id: $id}) OPTIONAL MATCH (f)-[:NEXT_LEG]->(g:Flight {status: 'cancelled'})
+                WHERE g.dest = f.origin
+                RETURN f.id AS flight, f.status AS status, f:Active AS active, g.id AS return_leg""", {"id": act["flight"]})
+            ok = rows and rows[0]["status"] == "cancelled" and not rows[0]["active"]
+        elif op == "publish_delays":
+            want = {x["flight"]: x["delay"] for x in act["delays"]}
+            rows = self._run("UNWIND $ids AS i MATCH (f:Flight {id: i}) RETURN f.id AS flight, f.delay AS delay, f.status AS status",
+                             {"ids": list(want)})
+            ok = len(rows) == len(want) and all(r["delay"] == want[r["flight"]] for r in rows)
+        elif op == "assign_reserve":
+            rows = self._run("""MATCH (c:Crew)-[a:ASSIGNED]->(f:Flight {id: $f})
+                RETURN c.id AS crew, c.reserve AS reserve, a.relieved_by AS relieved_by""", {"f": act["flight"]})
+            ok = any(r["crew"] == act["reserve"] and not r["relieved_by"] for r in rows) and \
+                all(r["relieved_by"] == act["reserve"] for r in rows if r["crew"] == act["replaces"])
+        elif op == "apply_rebook":
+            rows = self._run("""MATCH (b:Booking {id: $b})-[s:SEGMENT]->(f:Flight)
+                RETURN b.status AS status, s.seq AS seq, f.id AS flight, f:Active AS active ORDER BY s.seq""",
+                             {"b": act["booking"]})
+            ok = [r["flight"] for r in rows] == list(act["flights"]) and all(r["active"] for r in rows)
+        else:
+            rows, ok = [], False
+        return self._result("answered" if ok else "rejected", rows, start=start,
+                            reason=None if ok else "the graph does not show the intended state")
+
     def reset_ops(self):
-        """Undo all simulated operational changes (keeps memory)."""
+        """Undo every simulated operational change: delays, cancellations, reserve swaps,
+        rebookings and claims. Memory (decisions, lessons) is kept."""
         self._run("MATCH (f:Flight) WHERE f.status <> 'scheduled' SET f.delay = 0, f.status = 'scheduled', f:Active",
                   write=True)
+        self._run("MATCH (:Crew)-[a:ASSIGNED]->() WHERE a.replaced IS NOT NULL DELETE a", write=True)
+        self._run("MATCH ()-[a:ASSIGNED]->() WHERE a.relieved_by IS NOT NULL SET a.relieved_by = NULL", write=True)
+        self._run("""MATCH (a:Flight)-[x:CREW_NEXT_RELIEVED]->(b:Flight)
+            CREATE (a)-[:CREW_NEXT {crew: x.crew, slack: x.slack}]->(b) DELETE x""", write=True)
+        for b in self._run("MATCH (b:Booking) WHERE b.orig IS NOT NULL RETURN b.id AS id"):
+            # one booking per query, so pax counts on shared flights never race within a statement
+            self._run("MATCH (b:Booking {id: $id})-[s:SEGMENT]->(f:Flight) SET f.pax = f.pax - b.pax DELETE s",
+                      {"id": b["id"]}, write=True)
+            self._run("""MATCH (b:Booking {id: $id}) UNWIND range(0, size(b.orig) - 1) AS i
+                MATCH (f:Flight {id: b.orig[i]}) CREATE (b)-[:SEGMENT {seq: i + 1}]->(f) SET f.pax = f.pax + b.pax""",
+                      {"id": b["id"]}, write=True)
+            self._run("MATCH (b:Booking {id: $id}) SET b.status = 'confirmed', b.orig = NULL", {"id": b["id"]}, write=True)
         self._run("MATCH (:Crew)-[c:CLAIMED_FOR]->() DELETE c", write=True)
         self._run("MATCH (:Agent)-[c:CLAIMED]->() DELETE c", write=True)
+        # proposals made against the old state must not be approved against the new one
+        self._run("MATCH (d:Decision {status: 'proposed'}) SET d.status = 'superseded'", write=True)
 
 
 # Tool schemas exposed to the LLM. Writes that change the operation are NOT here:
@@ -472,6 +547,8 @@ class Tools:
 CATALOGUE = {
     "resolve_flight": ("Find a flight by id or by flight number (e.g. 'WN2262 2022-12-22 DEN').",
                        {"ref": {"type": "string"}}, ["ref"]),
+    "resolve_airport": ("Airport code from a code, airport name or city (full-text search), e.g. 'Midway'.",
+                        {"name": {"type": "string"}}, ["name"]),
     "propagate_delay": ("Project how delays ripple through aircraft rotations and crew connections. "
                         "Returns downstream delayed flights with the graph path behind each, passenger "
                         "misconnects and crews pushed past their duty limit.",

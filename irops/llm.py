@@ -8,10 +8,13 @@ import json
 import os
 import re
 
+from datetime import timedelta
+
+from irops.ingest import EPOCH
 from irops.tools import Tools, tool_specs
 
 MODEL = "claude-opus-5-5"
-IDS = re.compile(r"\b(2022-12-\d\d-WN\d+-[A-Z]{3}|R-[A-Z]{3}-\d{3}|C\d{4}|B\d{5})\b")
+IDS = re.compile(r"\b(2022-12-\d\d-[A-Z0-9]{2}\d+-[A-Z]{3}|R-[A-Z]{3}-\d{3}|C\d{4}|B\d{5})\b")
 
 SYSTEM = """You are the duty manager's analyst in an airline operations control centre during
 irregular operations. The airline's live state is a FalkorDB graph you can only reach through the tools.
@@ -54,6 +57,15 @@ def ask(question, tenant="irops_WN"):
     t = Tools(tenant)
     if not available():
         return route(question, t)
+    try:
+        return _ask_claude(question, t)
+    except Exception as e:  # API down, rate limit, bad key: answer from the same tools, and say why
+        out = route(question, t)
+        out["note"] = f"Claude unavailable ({type(e).__name__}); answered by the intent router."
+        return out
+
+
+def _ask_claude(question, t: Tools):
     client = _client()
     messages = [{"role": "user", "content": question}]
     calls, seen = [], set()
@@ -99,13 +111,18 @@ def briefing(facts):
 
 def route(q, t: Tools):
     """Keyless mode: map common questions to one tool each."""
-    u = q.upper()
-    fl = re.search(r"(2022-12-\d\d-WN\d+-[A-Z]{3}|WN\s?\d{1,4}(?:\s+2022-12-\d\d)?(?:\s+[A-Z]{3})?)", u)
+    u, c = q.upper(), t.carrier
+    fl = re.search(rf"(2022-12-\d\d-{c}\d+-[A-Z]{{3}}|{c}\s?\d{{1,4}}(?:\s+2022-12-\d\d)?(?:\s+[A-Z]{{3}})?)", u)
     mins = re.search(r"(\d{2,4})\s*(MIN|M\b)", u)
     hrs = re.search(r"(\d+(?:\.\d+)?)\s*(H|HOUR)", u)
     ap = [a for a in re.findall(r"\b([A-Z]{3})\b", u) if a not in {"WHO", "THE", "AND", "FOR", "CAN", "HOW", "WHY",
                                                                    "MIN", "ARE", "OUT", "ANY", "OUR"}]
     bk = re.search(r"\bB\d{5}\b", u)
+    if not ap:  # "Denver", "Midway": resolve names through the airport full-text index
+        named = re.search(r"\b(?:at|in|from|about|to|for)\s+([A-Za-z][A-Za-z .'-]{2,40})", q, re.I)
+        hit = t.resolve_airport(named.group(1)) if named else None
+        if hit and hit["outcome"] == "answered":
+            ap = [hit["rows"][0]["code"]]
     if fl and (mins or hrs):
         d = int(mins.group(1)) if mins else int(float(hrs.group(1)) * 60)
         res, tool, args = t.propagate_delay([{"flight": fl.group(1), "delay": d}], 8), "propagate_delay", {"flight": fl.group(1), "delay": d}
@@ -114,7 +131,8 @@ def route(q, t: Tools):
     elif re.search(r"RESERVE|COVER|CREW AT", u) and ap:
         res, tool, args = t.find_reserve(ap[-1], minutes_needed=300), "find_reserve", {"airport": ap[-1]}
     elif re.search(r"CRITICAL|LOAD.BEARING|MOST IMPORTANT", u):
-        res, tool, args = t.critical_flights("2022-12-22", 10), "critical_flights", {}
+        day = (EPOCH + timedelta(minutes=t.now())).strftime("%Y-%m-%d")  # the simulation clock's day
+        res, tool, args = t.critical_flights(day, 10), "critical_flights", {"date": day}
     elif re.search(r"CUT OFF|NETWORK|ISOLATED|CANCELLED", u):
         res, tool, args = t.network_health(), "network_health", {}
     elif re.search(r"REMEMBER|LAST TIME|BEFORE|HISTORY", u) and (ap or fl):
@@ -123,8 +141,8 @@ def route(q, t: Tools):
     elif re.search(r"STRANDED|BROKEN|MISCONNECT|REBOOK", u):
         res, tool, args = t.disrupted_bookings(20), "disrupted_bookings", {}
     else:
-        return {"by": "router", "answer": "Try: 'What breaks if WN2262 2022-12-22 DEN is 2h late?', "
-                "'Who can cover a crew at SEA?', 'Rebook B09455', 'Which flights are load-bearing?', "
+        return {"by": "router", "answer": f"Try: 'What breaks if {c}2262 2022-12-22 DEN is 2h late?', "
+                "'Who can cover a crew at Denver?', 'Rebook B09455', 'Which flights are load-bearing?', "
                 "'Which airports are cut off?', 'What do we remember about DEN?'", "calls": []}
     return {"by": "router", "answer": _say(tool, res),
             "calls": [{"tool": tool, "args": args, "outcome": res["outcome"], "rows": res["rows"][:12],

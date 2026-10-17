@@ -13,6 +13,9 @@ const RULE_URL = {
   "DOT-REFUND-2024": "https://www.transportation.gov/briefing-room/biden-harris-administration-announces-final-rule-requiring-automatic-refunds-airline",
 };
 let tz = "America/Denver";
+let tenant = "irops_WN";   // one FalkorDB graph per airline; every call names the graph it acts on
+let scenarios = [];
+const CARRIER = (t) => t.split("_").pop();
 
 function el(tag, attrs = {}, ...kids) {
   const n = document.createElement(tag);
@@ -104,9 +107,39 @@ function showPaths(paths, caption, delays = {}) {
 // ---------- scenario + run ----------
 async function init() {
   const s = await api("/api/scenarios");
-  for (const sc of s.scenarios) $("scenario").append(el("option", { value: sc.id }, sc.title));
+  scenarios = s.scenarios;
+  for (const sc of s.scenarios) $("scenario").append(el("option", { value: sc.id }, `${sc.title} · ${CARRIER(sc.tenant)}`));
+  $("scenario").addEventListener("change", pickScenario);
+  pickScenario();
   $("run").addEventListener("click", run);
+  $("reset").addEventListener("click", resetOps);
+  $("mcp-cmd").textContent = `claude mcp add --transport http irops-brain ${location.origin}/mcp/`;
+  $("mcp-copy").addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText($("mcp-cmd").textContent); $("mcp-copy").textContent = "Copied"; }
+    catch { $("mcp-copy").textContent = "Select the command and copy it"; }
+  });
+  loadMcpTools();
   loadProof();
+}
+
+function pickScenario() {
+  const sc = scenarios.find((x) => x.id === $("scenario").value);
+  if (!sc) return;
+  tenant = sc.tenant;
+  $("q").placeholder = CARRIER(tenant) === "AS" ? "What breaks if AS292 2022-12-22 SEA is 3h late?"
+    : "What breaks if WN2262 2022-12-22 DEN is 2h late?";
+}
+
+async function resetOps() {
+  const btn = $("reset");
+  btn.disabled = true;
+  try {
+    await api(`/api/reset?tenant=${encodeURIComponent(tenant)}`, {});
+    document.querySelectorAll("#strips .strip:not(.done)").forEach((li) => markDone(li, "superseded"));
+    $("board-hint").textContent = `Every approved change in ${CARRIER(tenant)}'s graph was undone. Run the agents again for fresh proposals.`;
+  } catch (e) {
+    $("board-hint").textContent = `Undo failed: ${e.message}`;
+  } finally { btn.disabled = false; }
 }
 
 async function run() {
@@ -115,6 +148,8 @@ async function run() {
   try {
     const r = await api("/api/run", { scenario: $("scenario").value });
     tz = r.scenario.tz;
+    tenant = r.tenant;
+    $("board-hint").textContent = `Nothing changes the operation until you approve it. Graph: ${r.tenant}.`;
     $("clock-time").textContent = local(r.scenario.clock);
     $("clock-zone").textContent = `${local(r.scenario.clock, tz, { weekday: "short", day: "numeric", month: "short", timeZoneName: "short" })} · session ${r.session}`;
     $("story-title").textContent = r.scenario.title;
@@ -123,7 +158,7 @@ async function run() {
     b.hidden = false;
     b.textContent = r.briefing.text;
     renderImpact(r.summary);
-    renderStrips(r.proposals);
+    renderStrips(r.proposals.map((p) => ({ ...p, tenant: r.tenant })));
     renderTrace(r.steps);
     const prop = r.steps.find((s) => s.tool === "propagate_delay");
     if (prop) {
@@ -166,7 +201,7 @@ function strip(p) {
     actions.append(el("button", { class: "approve", onclick: () => decide(p, li, "approve") }, "Approve"),
       el("button", { onclick: () => decide(p, li, "reject") }, "Reject"));
   }
-  if (evidence) actions.append(el("button", { onclick: () => showPaths([evidence], p.summary) }, "Show evidence"));
+  if (evidence) actions.append(el("button", { class: "ev", onclick: () => showPaths([evidence], p.summary) }, "Show evidence"));
   li.append(el("div", { class: "strip-body" },
     el("div", { class: "strip-kind" }, KIND[p.kind] || p.kind, el("small", {}, AGENTS[p.agent])),
     el("div", { class: "strip-main" }, el("p", {}, p.summary),
@@ -179,16 +214,25 @@ function strip(p) {
 function markDone(li, status, note) {
   li.classList.add("done");
   li.append(el("span", { class: `stamp ${status}` }, status.toUpperCase()));
-  if (note) li.querySelector(".strip-main").append(el("div", { class: "verify" }, note));
+  if (note) li.querySelector(".strip-main").append(el("div", { class: status === "approved" ? "verify" : "verify bad" }, note));
 }
 
 async function decide(p, li, verb) {
-  li.querySelectorAll("button").forEach((b) => (b.disabled = true));
-  const r = await api(`/api/decisions/${p.id}/${verb}`, {});
+  const buttons = li.querySelectorAll(".actions button:not(.ev)");
+  buttons.forEach((b) => (b.disabled = true));
+  let r;
+  try {
+    r = await api(`/api/decisions/${p.id}/${verb}?tenant=${encodeURIComponent(p.tenant || tenant)}`, {});
+  } catch (e) {
+    buttons.forEach((b) => (b.disabled = false));
+    li.querySelector(".strip-main").append(el("div", { class: "verify bad" }, `Not sent: ${e.message}. Try again.`));
+    return;
+  }
+  if (!r.ok) return markDone(li, verb === "reject" ? "superseded" : "failed", r.reason || "The graph refused this change.");
   if (verb === "reject") return markDone(li, "rejected");
-  if (!r.ok) return markDone(li, "failed", r.reason || "The graph refused this change.");
   const v = r.verification;
-  markDone(li, "approved", `Written to the graph and re-checked: ${v.outcome}, ${v.rows.length} row(s) read back.`);
+  markDone(li, "approved", `Written to the graph, then read back: ${v.rows.length} row(s) show the intended state.`);
+  if (v.cypher?.length) li.querySelector(".strip-main").append(el("details", {}, el("summary", {}, "Read-back query"), v.cypher.map((q) => el("pre", {}, q))));
 }
 
 function renderTrace(steps) {
@@ -212,9 +256,9 @@ $("ask-form").addEventListener("submit", async (ev) => {
   const box = $("answer");
   box.replaceChildren(el("p", { class: "by" }, "Asking the graph…"));
   try {
-    const r = await api("/api/ask", { question: q });
+    const r = await api("/api/ask", { question: q, tenant });
     const paths = r.calls.flatMap((c) => c.paths || []);
-    box.replaceChildren(el("p", { class: "text" }, r.answer),
+    box.replaceChildren(el("p", { class: "text" }, r.answer), ...(r.note ? [el("p", { class: "by" }, r.note)] : []),
       el("p", { class: "by" }, `${r.by === "claude" ? "Claude, using" : "Answered by"} ${r.calls.map((c) => c.tool).join(", ") || "no tool"}`),
       ...r.calls.map((c) => el("details", {}, el("summary", {}, `${c.tool}: ${c.outcome}`), c.cypher.map((x) => el("pre", {}, x)))));
     if (paths.length) showPaths(paths, q);
@@ -227,22 +271,35 @@ $("ask-form").addEventListener("submit", async (ev) => {
 async function loadProof() {
   const { results } = await api("/api/backtest");
   if (!results.length) return;
-  const head = el("tr", {}, ["Traversal depth", "Real knock-on delays", "Caught", "Recall", "Precision", "Mean error"].map((h) => el("th", {}, h)));
-  const best = Math.max(...results.map((r) => r.caught));
+  const head = el("tr", {}, ["Airline", "Traversal depth", "Real knock-on delays", "Caught", "Recall", "Precision", "Mean error"].map((h) => el("th", {}, h)));
+  const best = {};
+  for (const r of results) best[r.airline] = Math.max(best[r.airline] || 0, r.caught);
   $("backtest").replaceChildren(el("thead", {}, head), el("tbody", {}, results.map((r) =>
-    el("tr", { class: r.caught === best ? "best" : "" }, el("td", {}, r.hops === 1 ? "1 hop (previous leg only)" : `${r.hops} hops`),
+    el("tr", { class: r.caught === best[r.airline] ? "best" : "" }, el("td", {}, r.airline === "AS" ? "Alaska" : "Southwest"),
+      el("td", {}, r.hops === 1 ? "1 hop (previous leg only)" : `${r.hops} hops`),
       el("td", {}, fmt(r.real_knock_on_flights)), el("td", {}, fmt(r.caught)), el("td", {}, `${Math.round(r.recall * 100)}%`),
       el("td", {}, `${Math.round(r.precision * 100)}%`), el("td", {}, `${r.mae_minutes_on_caught} min`)))));
 }
 
 async function loadCompare(root) {
   try {
-    const c = await api(`/api/compare?flight=${encodeURIComponent(root.flight)}&delay=${root.delay}`);
+    const c = await api(`/api/compare?flight=${encodeURIComponent(root.flight)}&delay=${root.delay}&tenant=${encodeURIComponent(tenant)}`);
     $("compare").replaceChildren(
       el("div", {}, el("h3", {}, "Record lookup"), el("p", {}, `${c.flight.fno} ${c.flight.origin}→${c.flight.dest} is ${c.delay} min late. ${c.flat.why} Connections and crews: unknown.`)),
       el("div", { class: "graph" }, el("h3", {}, "Graph traversal"),
         el("p", {}, `${fmt(c.graph.downstream_flights)} more flights late, ${fmt(c.graph.pax_misconnecting)} passengers miss connections, ${fmt(c.graph.crews_illegal)} crews over their duty limit — from the same one late flight.`)));
   } catch { /* comparison is optional */ }
+}
+
+// the MCP endpoint is live: list its tools with a real JSON-RPC call
+async function loadMcpTools() {
+  try {
+    const r = await fetch("/mcp/", { method: "POST", headers: { "content-type": "application/json",
+      accept: "application/json, text/event-stream" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }) });
+    const j = await r.json();
+    const names = (j.result?.tools || []).map((t) => t.name);
+    $("mcp-tools").textContent = names.length ? `Live now: ${names.join(", ")}.` : "";
+  } catch { /* the panel still shows how to connect */ }
 }
 
 init();
