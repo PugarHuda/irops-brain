@@ -15,7 +15,7 @@ cites the regulation it relies on, and waits for a human to approve it.
 **Tracks:** 01 Agents That Act on Connected Data (primary) · 02 Agent Memory and Coordination · 03 Company Brain
 
 - Demo video: _add link_
-- Live deployment: https://irops-brain.onrender.com (free tier: the first request after idle takes ~1 min to wake up)
+- Live: https://irops-brain.vercel.app (static UI on Vercel; `/api` and `/mcp` are proxied to the FastAPI + FalkorDB backend at https://irops-brain.onrender.com, which on the free tier takes ~1 min to wake after idle)
 
 ## What it does
 
@@ -44,7 +44,7 @@ cites the regulation it relies on, and waits for a human to approve it.
    nodes (refreshed at most every 5 minutes), then matched against the route network: how many routes and daily
    flights touch each constrained airport, and which spoke airports depend on it.
 9. **Bring your own agent (MCP).** The read-only tool catalogue is also served as an MCP server at `/mcp/`
-   (streamable HTTP) and over stdio: `claude mcp add --transport http irops-brain https://irops-brain.onrender.com/mcp/`.
+   (streamable HTTP) and over stdio: `claude mcp add --transport http irops-brain https://irops-brain.vercel.app/mcp/`.
 
 ## Does it predict what really happened?
 
