@@ -28,7 +28,7 @@ button, select, input { font: inherit; color: inherit; }
 .brand h1 { font-size: 2.4rem; line-height: 1; }
 .brand p { margin: 4px 0 0; color: var(--ink-soft); font-size: .95rem; }
 .controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; min-width: 0; }
-.controls select { min-width: 0; max-width: 100%; }
+.controls select { min-width: 0; max-width: 100%; width: 24rem; }  /* fixed: options load after paint */
 .controls label { color: var(--ink-soft); }
 select { padding: 8px 10px; border: 1.5px solid var(--ink); background: white; border-radius: 3px; }
 button { cursor: pointer; padding: 8px 16px; border: 1.5px solid var(--ink); background: white; border-radius: 3px; }
@@ -139,6 +139,7 @@ footer { padding: 18px 28px; color: var(--ink-soft); font-size: .85rem; }
 @media (max-width: 1100px) {
   .bar { grid-template-columns: 1fr; position: static; padding: 16px; }
   .clock { text-align: left; }
+  .controls select { width: 100%; }
   main { grid-template-columns: 1fr; }
   main > section { padding: 20px 16px; border-right: 0 !important; }
   .story { grid-template-columns: 1fr; }
