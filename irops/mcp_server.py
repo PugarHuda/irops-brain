@@ -91,6 +91,17 @@ def disrupted_bookings(airline: str, limit: int = 20) -> dict:
     return _out(_t(airline).disrupted_bookings(limit))
 
 
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, idempotentHint=True, openWorldHint=True))
+def live_conditions(airline: str) -> dict:
+    """Airports in the airline's network constrained RIGHT NOW: FAA ground stops, ground delay programs, delays and
+    closures, plus IFR/LIFR weather from METAR, with routes and daily flights through each. Refreshes the graph's
+    live layer from the FAA and aviationweather.gov at most every 5 minutes."""
+    from irops import live
+    t = _t(airline)
+    feed = live.refresh(t)
+    return {"feed": feed, **_out(t.live_conditions())}
+
+
 @mcp.tool(annotations=RO)
 def recall(airline: str, about: str) -> dict:
     """Earlier agent decisions and lessons about a flight, crew, booking or airport (agent memory in the graph)."""

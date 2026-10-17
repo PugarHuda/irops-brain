@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import BaseModel, Field
 
-from irops import agents, llm
+from irops import agents, live, llm
 from irops.mcp_server import mcp
 from irops.scenario import SCENARIOS
 from irops.tools import Tools
@@ -20,6 +20,17 @@ TENANTS = sorted({s["tenant"] for s in SCENARIOS.values()})  # one isolated grap
 # ponytail: one global lock. Scenarios and approvals rewrite the shared operational state, so two visitors
 # running at once would interleave; per-tenant locks if throughput ever matters.
 WRITE = threading.Lock()
+
+
+@contextlib.contextmanager
+def writing(wait_s):
+    """Hold the write lock, or tell the caller plainly that someone else's run is in progress."""
+    if not WRITE.acquire(timeout=wait_s):
+        raise HTTPException(429, "Another visitor's agents are working on the graph. Try again in a few seconds.")
+    try:
+        yield
+    finally:
+        WRITE.release()
 
 # read-only tools, public, no cookies: DNS-rebinding protection guards localhost servers, not this one
 mcp_app = mcp.streamable_http_app(streamable_http_path="/", stateless_http=True, json_response=True,
@@ -80,29 +91,43 @@ def scenarios():
 def run(body: Run):
     if body.scenario not in SCENARIOS:
         raise HTTPException(404, "unknown scenario")
-    with WRITE:
+    with writing(5):
         ensure_graphs()  # the database may have restarted (and come back empty) since this process started
         return agents.run(body.scenario)
 
 
 @app.post("/api/decisions/{decision_id}/approve")
 def approve(decision_id: str, tenant: str = "irops_WN"):
-    with WRITE:
+    with writing(30):
         return agents.approve(decision_id, tenant_of(tenant))
 
 
 @app.post("/api/decisions/{decision_id}/reject")
 def reject(decision_id: str, tenant: str = "irops_WN"):
-    with WRITE:
+    with writing(30):
         return agents.reject(decision_id, tenant_of(tenant))
 
 
 @app.post("/api/reset")
 def reset(tenant: str = "irops_WN"):
     """Undo every approved change in one airline's graph (memory is kept)."""
-    with WRITE:
+    with writing(30):
         Tools(tenant_of(tenant)).reset_ops()
     return {"ok": True}
+
+
+@app.get("/api/live")
+def live_now(tenant: str = "irops_WN"):
+    """FAA airport status + METAR, refreshed into this airline's graph (cached 5 min), read back with the network."""
+    t = Tools(tenant_of(tenant))
+    try:
+        with writing(10):
+            feed = live.refresh(t)
+    except HTTPException:
+        raise
+    except Exception as e:  # FAA or aviationweather unreachable: show the last layer in the graph, and say so
+        feed = {"refreshed": False, "error": f"{type(e).__name__}: {e}"[:200]}
+    return {"feed": feed, **t.live_conditions()}
 
 
 @app.post("/api/ask")

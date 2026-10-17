@@ -130,6 +130,15 @@ def route(q, t: Tools):
         res, tool, args = t.rebook_options(bk.group(0), 3), "rebook_options", {"booking_id": bk.group(0)}
     elif re.search(r"RESERVE|COVER|CREW AT", u) and ap:
         res, tool, args = t.find_reserve(ap[-1], minutes_needed=300), "find_reserve", {"airport": ap[-1]}
+    elif re.search(r"RIGHT NOW|LIVE|TODAY|FAA|GROUND STOP|WEATHER|METAR", u):
+        from irops import live
+        live.refresh(t)
+        res, tool, args = t.live_conditions(), "live_conditions", {}
+    elif re.search(r"\bC\d{4}\b|\bR-[A-Z]{3}-\d{3}\b", u):
+        cid = re.search(r"\bC\d{4}\b|\bR-[A-Z]{3}-\d{3}\b", u).group(0)
+        res, tool, args = t.crew_duty(cid), "crew_duty", {"crew_id": cid}
+    elif fl:
+        res, tool, args = t.resolve_flight(fl.group(1)), "resolve_flight", {"ref": fl.group(1)}
     elif re.search(r"CRITICAL|LOAD.BEARING|MOST IMPORTANT", u):
         day = (EPOCH + timedelta(minutes=t.now())).strftime("%Y-%m-%d")  # the simulation clock's day
         res, tool, args = t.critical_flights(day, 10), "critical_flights", {"date": day}
@@ -171,6 +180,17 @@ def _say(tool, r):
         return f"{r['components']} network component(s); cut off: {', '.join(r['cut_off_airports']) or 'none'}."
     if tool == "recall":
         return "; ".join(x["summary"] for x in rows[:3]) or "; ".join(x["lesson"] for x in r.get("lessons", [])[:3])
+    if tool == "live_conditions":
+        f = r.get("feed", {})
+        bits = [f"{x['airport']} ({'; '.join(l['kind'] for l in x['live'])}; {int(x['daily_flights'] or 0)} flights/day touch it)"
+                for x in rows[:5]]
+        return f"Right now (FAA {f.get('faa_time', '?')}): " + ", ".join(bits) + "."
+    if tool == "crew_duty":
+        last = rows[-1]
+        return (f"{len(rows)} legs; duty limit {last['fdp_limit']} min, projected use {last['fdp_used']} min "
+                f"({'over' if last['fdp_used'] > last['fdp_limit'] else 'within'} the limit).")
+    if tool == "resolve_flight":
+        return "; ".join(f"{x['id']} {x['origin']}->{x['dest']} {x['status']}" for x in rows[:6])
     if tool == "disrupted_bookings":
         return f"{len(rows)} broken itineraries, e.g. " + ", ".join(f"{x['booking']} ({x['reason']})" for x in rows[:4])
     return json.dumps(rows[:5], default=str)

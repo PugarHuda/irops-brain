@@ -67,7 +67,24 @@ def main():
     other_airline_is_isolated()
     names_and_constraints()
     mcp_serves_the_catalogue()
+    live_feeds_land_in_the_graph()
     print("all checks passed")
+
+
+def live_feeds_land_in_the_graph():
+    """Real FAA + METAR feeds (network needed): written as nodes linked to airports, read back with the network."""
+    from irops import live
+    t = Tools()
+    feed = live.refresh(t, force=True)
+    assert feed["refreshed"] and feed["metars"] > 50, feed
+    r = t.live_conditions()
+    assert r["outcome"] in ("answered", "not_in_graph") and r["feed"]["faa_time"], r
+    assert sum(c["airports"] for c in r["weather_categories"]) == feed["metars"]
+    for row in r["rows"]:
+        assert row["live"] and t._airport(row["airport"])
+    assert not live.refresh(t)["refreshed"]  # cached: the FAA is not hammered
+    assert route("What is constrained right now?", t)["calls"][0]["tool"] == "live_conditions"
+    assert route("Is crew C0464 legal?", t)["calls"][0]["tool"] == "crew_duty"
 
 
 def snapshot(t):
@@ -145,7 +162,9 @@ def mcp_serves_the_catalogue():
         async with Client(mcp) as c:
             tools = {x.name: x for x in (await c.list_tools()).tools}
             assert {"propagate_delay", "find_reserve", "rebook_options", "recall"} <= set(tools)
-            assert all(x.annotations.read_only_hint for x in tools.values())
+            # every tool is read-only except the live refresh, which writes the live layer and says so
+            assert all(x.annotations.read_only_hint for n, x in tools.items() if n != "live_conditions")
+            assert tools["live_conditions"].annotations.open_world_hint
             r = await c.call_tool("resolve_airport", {"airline": "WN", "name": "Midway"})
             assert "MDW" in r.content[0].text, r
             bad = await c.call_tool("network_health", {"airline": "ZZ"})

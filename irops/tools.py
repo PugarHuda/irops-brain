@@ -491,6 +491,33 @@ class Tools:
             RETURN DISTINCT b.id AS booking""", {"id": booking_id, "flights": list(flights)}, write=True)
         return self._result("answered" if rows else "rejected", rows, start=start)
 
+    def live_conditions(self):
+        """Airports in this airline's network that the FAA or the weather constrain right now, with how much of
+        the network runs through each (routes and scheduled departures per day) and which spoke airports
+        depend on it for most of their service."""
+        start = len(self.trace)
+        feed = self._run("MATCH (f:LiveFeed {id: 'feed'}) RETURN f.fetched AS fetched, f.faa_time AS faa_time")
+        if not feed:
+            return self._result("not_in_graph", start=start, reason="live feed never refreshed")
+        rows = self._run("""
+            MATCH (l:Live)-[:AT]->(a:Airport)
+            WITH a, collect({source: l.source, kind: l.kind, reason: l.reason, detail: l.detail, as_of: l.as_of}) AS live
+            OPTIONAL MATCH (a)-[r:ROUTE]-(b:Airport)
+            WITH a, live, count(DISTINCT b) AS routes, sum(r.daily) AS daily_flights
+            OPTIONAL MATCH (s:Airport)-[sr:ROUTE]-(a)
+            WITH a, live, routes, daily_flights, s, sr
+            OPTIONAL MATCH (s)-[sx:ROUTE]-(:Airport)
+            WITH a, live, routes, daily_flights, s, sr.daily AS via, sum(sx.daily) AS total
+            WITH a, live, routes, daily_flights,
+                 collect(DISTINCT CASE WHEN s IS NOT NULL AND via * 2 >= total THEN s.code END) AS dependent
+            RETURN a.code AS airport, a.name AS name, a.wx_cat AS flight_category, a.wx_raw AS metar,
+                   routes, daily_flights, dependent AS spokes_mostly_served_from_here, live
+            ORDER BY daily_flights DESC""")
+        wx = self._run("""MATCH (a:Airport) WHERE a.wx_cat IS NOT NULL
+            RETURN a.wx_cat AS cat, count(*) AS airports ORDER BY airports DESC""")
+        return self._result("answered" if rows else "not_in_graph", rows, start=start, feed=feed[0],
+                            weather_categories=wx)
+
     def read_back(self, op, act):
         """After an approved write: read the graph again and check it now holds the intended state."""
         start = len(self.trace)
@@ -566,6 +593,8 @@ CATALOGUE = {
                            {"limit": {"type": "integer"}}, ["limit"]),
     "rebook_options": ("k fastest feasible re-routings for a booking (k-shortest paths).",
                        {"booking_id": {"type": "string"}, "k": {"type": "integer"}}, ["booking_id", "k"]),
+    "live_conditions": ("Airports in the network constrained RIGHT NOW (FAA ground stops/delay programs/closures, "
+                        "IFR weather from METAR), with routes and daily flights through each.", {}, []),
     "recall": ("Earlier decisions and lessons about a flight, crew, airport or booking.",
                {"about": {"type": "string"}}, ["about"]),
 }

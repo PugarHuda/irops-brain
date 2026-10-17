@@ -113,6 +113,7 @@ async function init() {
   pickScenario();
   $("run").addEventListener("click", run);
   $("reset").addEventListener("click", resetOps);
+  $("live-refresh").addEventListener("click", loadLive);
   $("mcp-cmd").textContent = `claude mcp add --transport http irops-brain ${location.origin}/mcp/`;
   $("mcp-copy").addEventListener("click", async () => {
     try { await navigator.clipboard.writeText($("mcp-cmd").textContent); $("mcp-copy").textContent = "Copied"; }
@@ -122,10 +123,34 @@ async function init() {
   loadProof();
 }
 
+async function loadLive() {
+  const list = $("live-list"), btn = $("live-refresh");
+  btn.disabled = true;
+  list.replaceChildren(el("li", { class: "empty" }, "Reading the FAA and weather feeds…"));
+  try {
+    const r = await api(`/api/live?tenant=${encodeURIComponent(tenant)}`);
+    const when = r.feed?.faa_time || "";
+    $("live-caption").textContent = r.feed?.error
+      ? `The live feeds could not be reached (${r.feed.error}). Showing the last layer stored in the graph.`
+      : `FAA status as of ${when}. METAR for ${r.weather_categories.reduce((n, c) => n + c.airports, 0)} airports in ${CARRIER(tenant)}'s network: `
+        + r.weather_categories.map((c) => `${c.airports} ${c.cat}`).join(", ") + ".";
+    if (!r.rows.length) { list.replaceChildren(el("li", { class: "empty" }, "Nothing in this network is constrained right now.")); return; }
+    list.replaceChildren(...r.rows.map((x) => el("li", {},
+      el("b", {}, x.airport), ` ${x.name || ""} · ${fmt(x.routes)} routes, ${fmt(x.daily_flights)} flights a day touch it`,
+      x.spokes_mostly_served_from_here.length ? ` · mostly serves ${x.spokes_mostly_served_from_here.join(", ")}` : "",
+      el("ul", {}, x.live.map((l) => el("li", {}, el("span", { class: `src ${l.source}` }, l.source), ` ${l.kind}: `,
+        el("code", {}, l.reason), l.detail ? ` (${l.detail})` : ""))))));
+  } catch (e) {
+    list.replaceChildren(el("li", { class: "empty" }, `Live conditions unavailable: ${e.message}`));
+  } finally { btn.disabled = false; }
+}
+
 function pickScenario() {
   const sc = scenarios.find((x) => x.id === $("scenario").value);
   if (!sc) return;
+  const changed = sc.tenant !== tenant || !$("live-list").children.length;
   tenant = sc.tenant;
+  if (changed) loadLive();
   $("q").placeholder = CARRIER(tenant) === "AS" ? "What breaks if AS292 2022-12-22 SEA is 3h late?"
     : "What breaks if WN2262 2022-12-22 DEN is 2h late?";
 }

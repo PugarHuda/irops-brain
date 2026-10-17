@@ -125,6 +125,13 @@ pre { font: 12px/1.45 var(--code); background: white; border: 1px solid var(--li
 .compare h3 { font-family: var(--display); margin: 0 0 4px; font-size: 1.2rem; }
 .compare p { margin: 0; font-size: .92rem; }
 .mcp { grid-column: 1 / -1; }
+.live { grid-column: 1 / -1; }
+.live-list { list-style: none; padding: 0; margin: 8px 0 0; display: grid; gap: 10px; max-width: 110ch; }
+.live-list > li { border-left: 4px solid var(--water); padding: 2px 0 2px 12px; overflow-wrap: anywhere; }
+.live-list .empty { border-left-color: var(--line); color: var(--ink-soft); }
+.live-list ul { list-style: none; padding: 0; margin: 4px 0 0; font-size: .9rem; }
+.src { font-family: var(--display); font-weight: 700; padding: 0 6px; border: 1px solid currentColor; border-radius: 2px; }
+.src.FAA { color: var(--magenta); } .src.METAR { color: var(--water); }
 .mcp pre { font-size: 13px; max-width: 72ch; }
 code { font-family: var(--code); font-size: .9em; }
 footer { padding: 18px 28px; color: var(--ink-soft); font-size: .85rem; }
