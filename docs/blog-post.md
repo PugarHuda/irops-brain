@@ -48,13 +48,33 @@ nodes too. So when you run the scenario again, the agents remember what happened
 DOT records how many minutes of each flight's delay came from its aircraft arriving late. We seeded the graph with only
 each flight's *own* delay and let the traversal spread it, then compared the result with what DOT recorded:
 
-| Traversal | Caught | Precision | Mean error |
-|---|---|---|---|
-| 1 hop | 1,211 of 3,087 | 95% | 33.7 min |
-| 8 hops | 1,505 of 3,087 | 95% | 30.2 min |
+| Airline | Traversal | Caught | Precision | Mean error |
+|---|---|---|---|---|
+| Southwest | 1 hop | 1,211 of 3,087 | 95% | 33.7 min |
+| Southwest | 8 hops | 1,505 of 3,087 | 95% | 30.2 min |
+| Alaska | 1 hop | 96 of 314 | 85% | 23.9 min |
+| Alaska | 8 hops | 119 of 314 | 87% | 26.6 min |
 
-Following the graph past the previous leg catches 24% more real knock-on delays at the same precision. Recall is 49%.
-Most of the misses are delay chains that started before our window opened.
+On both airlines, following the graph past the previous leg catches 24% more real knock-on delays at the same or better
+precision. Recall is 38-49%; most misses are delay chains that started before our window opened.
+
+## Approvals you can trust, and undo
+
+An approval in IROPS Brain is one atomic step from `proposed` to `executing`, so a double click or a second operator
+cannot run it twice. After the write, we read the graph back and stamp the proposal APPROVED only if the graph now
+shows the intended state. Nothing is deleted for good: a cancelled flight just loses its `:Active` label, and a
+relieved crew's connection is retyped to `CREW_NEXT_RELIEVED`. We first tried filtering every variable-length path
+instead, and it was 90 times slower. "Undo all approvals" restores the graph exactly, and the test suite checks that
+the counts match before and after.
+
+## Two airlines, and your own agent
+
+Alaska Airlines' Seattle ice storm runs on a second graph, `irops_AS`, with the same agents. The same read-only tools
+are also served as an MCP server, so you can point Claude Code at the live graph:
+
+```
+claude mcp add --transport http irops-brain https://irops-brain.onrender.com/mcp/
+```
 
 ## What we learned about FalkorDB
 
@@ -62,6 +82,9 @@ Most of the misses are delay chains that started before our window opened.
 - Each graph is a separate tenant: one graph per airline, isolated by the database rather than by a filter.
 - Because writes run one at a time, a check-and-claim inside one query cannot be won twice, so we needed no lock
   service.
+- Unique constraints make ids real identities, and a full-text index turns "Midway" into `MDW` for the agent.
+- On the 100 MB free cloud tier, `algo.betweenness` with 256 samples ran out of memory and took the graph with it.
+  64 samples fits, and the app now rebuilds the graph if it ever comes back empty.
 - We pinned v4.22.1 because A\* has not been ported to 6.x yet.
 
 The code, the data pipeline and the backtest are on GitHub: https://github.com/PugarHuda/irops-brain

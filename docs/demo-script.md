@@ -1,4 +1,4 @@
-# Demo video script (about 2:45)
+# Demo video script (about 3:00)
 
 Record at 1440x900, browser zoom 100%. Voice-over reads the quoted lines.
 
@@ -14,4 +14,5 @@ Record at 1440x900, browser zoom 100%. Voice-over reads the quoted lines.
 | 2:05 | Ask box: "What breaks if WN2262 is 2 hours late?" | "You can ask questions. The answer uses the same tools, and any flight id that did not come from the graph is withheld." |
 | 2:20 | Proof section: backtest table | "Does it work? We seeded only each flight's own delay and let the graph propagate it, then compared with what DOT recorded. 95 percent precision. Going multi-hop catches 24 percent more knock-on delays than looking one leg back." |
 | 2:35 | Run again: a lesson is recalled in the Ops lane | "Run it again and the agents remember what happened last time at Denver. Memory is just more nodes in the same graph." |
-| 2:45 | Repo URL plus "Built on FalkorDB" | "IROPS Brain. The connections are the database." |
+| 2:42 | Switch scenario to "Ice storm reaches Seattle · AS", run; then scroll to the MCP panel | "Another airline runs on its own graph with the same agents. The same tools are also an MCP server, so you can plug your own agent into the live graph." |
+| 2:55 | Repo URL plus "Built on FalkorDB" | "IROPS Brain. The connections are the database." |
