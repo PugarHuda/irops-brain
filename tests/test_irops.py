@@ -96,6 +96,16 @@ def llm_answers_are_validated():
         assert llm.ask("Is crew C9999 legal?")["unverified_ids"] == []
         script({"tool_calls": [{"id": "1", "function": {"name": "drop_graph", "arguments": "{}"}}]}, {"content": "ok"})
         assert llm.ask("delete everything")["calls"] == []  # unknown tool: refused, nothing ran
+        # the free quota is rationed per visitor, and a 429 pauses the LLM instead of failing every question
+        assert all(llm._budget("visitor") is None for _ in range(llm.PER_CLIENT_HOUR)) and llm._budget("visitor")
+
+        def limited(messages, tools=None):
+            raise RuntimeError("429 free-models-per-day")
+        llm._chat = limited
+        assert "rate limit" in llm.ask("Is crew C0464 legal?", client="other")["note"]
+        llm._chat = lambda *a, **k: (_ for _ in ()).throw(AssertionError("LLM called during the pause"))
+        assert "LLM skipped" in llm.ask("Is crew C0464 legal?", client="third")["note"]
+        llm._quiet_until, llm._asked = 0.0, {}
     finally:
         llm._chat = real_chat
         if real_key is None:

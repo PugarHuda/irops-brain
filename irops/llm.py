@@ -8,6 +8,7 @@ router to the same tools, and the answer says so.
 import json
 import os
 import re
+import time
 from datetime import timedelta
 
 import httpx
@@ -84,15 +85,47 @@ def _text(msg):
     return re.sub(r"<think>.*?</think>", "", msg.get("content") or "", flags=re.S).translate(DASHES).strip()
 
 
-def ask(question, tenant="irops_WN"):
+# The free OpenRouter tier allows ~50 requests a day per account and one question costs 2-4, so one visitor could
+# spend it all. ponytail: in-memory budget per client and a pause after a 429; a shared store if this ever runs
+# on more than one process.
+PER_CLIENT_HOUR = 6
+COOLDOWN_S = 600
+_asked: dict = {}
+_quiet_until = 0.0
+
+
+def _budget(client):
+    """None if this question may use the LLM, else the reason it may not."""
+    now = time.time()
+    if now < _quiet_until:
+        return f"the free models are rate-limited; the LLM is tried again after {time.strftime('%H:%M UTC', time.gmtime(_quiet_until))}"
+    if client:
+        recent = [x for x in _asked.get(client, []) if now - x < 3600]
+        if len(recent) >= PER_CLIENT_HOUR:
+            return f"{PER_CLIENT_HOUR} LLM questions per visitor per hour, to share the free quota"
+        _asked[client] = recent + [now]
+    return None
+
+
+def ask(question, tenant="irops_WN", client=None):
+    global _quiet_until
     t = Tools(tenant)
     if not available():
         return route(question, t)
+    skip = _budget(client)
+    if skip:
+        out = route(question, t)
+        out["note"] = f"LLM skipped ({skip}); answered by the intent router."
+        return out
     try:
         return _ask_llm(question, t)
     except Exception as e:  # rate limit, every free model busy, bad key: answer from the same tools, and say why
         out = route(question, t)
-        why = "rate limit on the free models" if "429" in str(e) else f"{type(e).__name__}: {str(e).splitlines()[0][:100]}"
+        if "429" in str(e):
+            _quiet_until = time.time() + COOLDOWN_S  # do not spend 2-4 failing calls on every question meanwhile
+            why = "rate limit on the free models"
+        else:
+            why = f"{type(e).__name__}: {str(e).splitlines()[0][:100]}"
         out["note"] = f"LLM unavailable ({why}); answered by the intent router."
         return out
 

@@ -4,7 +4,7 @@ import json
 import threading
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from mcp.server.transport_security import TransportSecuritySettings
@@ -133,10 +133,12 @@ def live_now(tenant: str = "irops_WN"):
 
 
 @app.post("/api/ask")
-def ask(body: Ask):
+def ask(body: Ask, request: Request):
     if not body.question.strip():
         raise HTTPException(400, "ask a question of up to 500 characters")
-    return llm.ask(body.question, tenant_of(body.tenant))
+    # behind Vercel and Render the first forwarded address is the visitor (spoofable; it only rations a free quota)
+    client = request.headers.get("x-forwarded-for", "").split(",")[0].strip() or (request.client and request.client.host)
+    return llm.ask(body.question, tenant_of(body.tenant), client)
 
 
 @app.get("/api/compare")
