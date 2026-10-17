@@ -243,6 +243,7 @@ cd video && npm ci
 npm run tts      # Microsoft neural voice (edge-tts) per scene + word timings -> public/*.mp3, timing.json
 npm run record   # Playwright drives https://irops-brain.vercel.app, long waits marked as cuts -> public/screen.webm
 npm run render   # Remotion: title cards, the recording, karaoke subtitles from the word timings -> out/*.mp4
+npm run finish   # loudness to -16 LUFS for upload -> out/irops-brain-demo-final.mp4
 ```
 
 The narration is `video/narration.json`. Every screen in the video is the real app doing the real thing; the waits for

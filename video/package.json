@@ -6,7 +6,8 @@
     "tts": "uv run --with edge-tts python tts.py",
     "record": "node record.mjs",
     "studio": "remotion studio src/index.ts",
-    "render": "remotion render src/index.ts Demo out/irops-brain-demo.mp4 --codec=h264 --crf=20"
+    "render": "remotion render src/index.ts Demo out/irops-brain-demo.mp4 --codec=h264 --crf=20",
+    "finish": "ffmpeg -y -i out/irops-brain-demo.mp4 -c:v copy -af loudnorm=I=-16:TP=-1.5:LRA=11 -c:a aac -b:a 192k -movflags +faststart out/irops-brain-demo-final.mp4"
   },
   "dependencies": {
     "@remotion/cli": "^4.0.362",
