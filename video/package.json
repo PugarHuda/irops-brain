@@ -1,0 +1,19 @@
+{
+  "name": "irops-brain-video",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "tts": "uv run --with edge-tts python tts.py",
+    "record": "node record.mjs",
+    "studio": "remotion studio src/index.ts",
+    "render": "remotion render src/index.ts Demo out/irops-brain-demo.mp4 --codec=h264 --crf=20"
+  },
+  "dependencies": {
+    "@remotion/cli": "^4.0.362",
+    "@remotion/google-fonts": "^4.0.362",
+    "playwright": "^1.56.1",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "remotion": "^4.0.362"
+  }
+}

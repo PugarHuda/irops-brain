@@ -1,0 +1,46 @@
+[
+ {
+  "id": "intro",
+  "text": "December 2022. Southwest Airlines cancelled nearly seventeen thousand flights in a week, and was later fined one hundred and forty million dollars. The storm started it. What turned it into a meltdown was that the airline lost track of how its operation connects: which crew flies which aircraft, and which passengers connect where."
+ },
+ {
+  "id": "story",
+  "text": "IROPS Brain replays that week from public US DOT data. Every flight, aircraft rotation, crew pairing and passenger connection is a node or an edge in a FalkorDB graph. We stop the clock at 8 a.m. in Denver, on December twenty-second. The graph only knows what was known at that moment."
+ },
+ {
+  "id": "run",
+  "text": "Three agents work the storm. Ops control traces how sixteen late departures spread through aircraft and crew connections, using up the spare minutes at every turn. Fifty more flights go late, seven hundred and forty-one connections break, twenty-one crews are pushed past their legal duty limit, and seven hundred and ninety passengers are now owed a refund under federal rules."
+ },
+ {
+  "id": "evidence",
+  "text": "Every number has a path behind it. This late Denver departure holds up its crew's next flight, and that aircraft then carries the delay on to Boston. The agent shows this path as its explanation. Nothing is generated after the fact."
+ },
+ {
+  "id": "proposals",
+  "text": "Crew scheduling finds reserve crews. When none is on call at the airport, it runs A-star over the route network to find the nearest base that has one, and claims that reserve atomically, so two agents can never take the same pilot. Every proposal cites the regulation it relies on."
+ },
+ {
+  "id": "approve",
+  "text": "Nothing changes until a human approves. On approval, the change is written to the graph, then read back as proof. Reject a proposal, and the agents remember: on the next run, that exact action is withheld."
+ },
+ {
+  "id": "trace",
+  "text": "The agents never write Cypher. They pick from a fixed set of queries written by people. Every argument is resolved against the graph first, and every step is logged here, query by query."
+ },
+ {
+  "id": "ask",
+  "text": "You can ask the graph questions in plain English. A free LLM picks the tools, and when its quota runs out, a deterministic router answers instead. Either way, any flight id that no tool returned is withheld."
+ },
+ {
+  "id": "proof",
+  "text": "Does it work? We seeded only each flight's own delay, let the graph propagate it, and compared with what the DOT recorded: ninety-five percent precision. We also score the agents' own calls against what the airline really did, including where the model falls short."
+ },
+ {
+  "id": "live",
+  "text": "The same graph takes in live FAA airport status and weather. A second airline, Alaska, runs on its own isolated graph. And every tool is also an MCP server, so you can plug your own agent straight into it."
+ },
+ {
+  "id": "outro",
+  "text": "IROPS Brain. The connections are the database."
+ }
+]
