@@ -1,0 +1,8 @@
+services:
+  falkordb:
+    # ponytail: pinned. 6.x (Rust engine) has not ported A*/CCH/Leiden yet.
+    image: falkordb/falkordb:v4.22.1
+    ports: ["6379:6379", "3000:3000"]
+    volumes: ["falkordb-data:/var/lib/falkordb/data"]
+volumes:
+  falkordb-data:

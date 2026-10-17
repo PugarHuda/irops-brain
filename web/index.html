@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IROPS Brain</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Crect width=%2716%27 height=%2716%27 fill=%27%2314233B%27/%3E%3Cpath d=%27M3 11l10-6M3 5l10 6%27 stroke=%27%23A3195B%27 stroke-width=%272%27/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Barlow+Condensed:wght@500;600;700&family=JetBrains+Mono:wght@400&display=swap">
+<link rel="stylesheet" href="/static/style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.30.2/cytoscape.min.js" integrity="sha384-IWROdLKRsN1UuJywMlWl7/blXQ8GEooN2n7dzTxfEPd7ybYIKCUJ2Ol/1Gpf3YV4" crossorigin="anonymous"></script>
+</head>
+<body>
+<header class="bar">
+  <div class="brand">
+    <h1>IROPS Brain</h1>
+    <p>Recovery agents for airline irregular operations, reasoning over a FalkorDB graph of real flights.</p>
+  </div>
+  <div class="controls">
+    <label for="scenario">Scenario</label>
+    <select id="scenario"></select>
+    <button id="run" class="primary">Run the agents</button>
+  </div>
+  <div class="clock" aria-live="polite">
+    <span id="clock-time">--:--</span>
+    <span id="clock-zone">Pick a scenario</span>
+  </div>
+</header>
+
+<main>
+  <section class="story" aria-labelledby="story-title">
+    <h2 id="story-title">Southwest, December 2022</h2>
+    <p id="story">In the week before Christmas 2022 Southwest cancelled nearly 17,000 flights. Its crew system lost track of
+      where crews and aircraft were and how they connected. This replay loads the airline's real schedule for 21–23 December
+      from US DOT data, and lets three agents work the storm from the graph.</p>
+    <p id="briefing" class="briefing" hidden></p>
+    <dl id="impact" class="impact" hidden></dl>
+  </section>
+
+  <section class="evidence" aria-labelledby="ev-title">
+    <div class="ev-head">
+      <h2 id="ev-title">Evidence</h2>
+      <p id="ev-caption">The graph paths behind the agents' answers appear here.</p>
+    </div>
+    <div id="cy" role="img" aria-label="Graph of flights, aircraft rotations and crew connections"></div>
+    <ul class="legend">
+      <li><i class="k-aircraft"></i>same aircraft</li>
+      <li><i class="k-crew"></i>same crew</li>
+      <li><i class="k-pax"></i>passenger connection</li>
+      <li><i class="k-route"></i>route / deadhead</li>
+    </ul>
+  </section>
+
+  <section class="board" aria-labelledby="board-title">
+    <h2 id="board-title">Proposals</h2>
+    <p class="hint">Nothing changes the operation until you approve it.</p>
+    <ol id="strips" class="strips"><li class="empty">Run the agents to fill the strip board.</li></ol>
+  </section>
+
+  <section class="trace" aria-labelledby="trace-title">
+    <h2 id="trace-title">What each agent did</h2>
+    <div id="lanes" class="lanes"></div>
+  </section>
+
+  <section class="ask" aria-labelledby="ask-title">
+    <h2 id="ask-title">Ask the graph</h2>
+    <form id="ask-form">
+      <input id="q" name="q" autocomplete="off" placeholder="What breaks if WN2262 2022-12-22 DEN is 2h late?">
+      <button type="submit">Ask</button>
+    </form>
+    <div id="answer" class="answer"></div>
+  </section>
+
+  <section class="proof" aria-labelledby="proof-title">
+    <h2 id="proof-title">Does it match what really happened?</h2>
+    <p>US DOT records how many minutes of each flight's delay came from its aircraft arriving late. We seed the graph with
+      only each flight's own weather, air-traffic and carrier delay, let it propagate along aircraft rotations, and compare.</p>
+    <table id="backtest"></table>
+    <div id="compare" class="compare"></div>
+  </section>
+</main>
+<footer>Flight data: US DOT BTS On-Time Performance, Dec 2022 (public). Crews and bookings are synthetic, generated on the real
+  schedule. Rules: 14 CFR Part 117. Not affiliated with any airline.</footer>
+<script src="/static/app.js"></script>
+</body>
+</html>

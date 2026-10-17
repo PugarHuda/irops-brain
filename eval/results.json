@@ -1,0 +1,31 @@
+{
+ "results": [
+  {
+   "hops": 1,
+   "real_knock_on_flights": 3087,
+   "predicted": 1269,
+   "caught": 1211,
+   "recall": 0.392,
+   "precision": 0.954,
+   "mae_minutes_on_caught": 33.7
+  },
+  {
+   "hops": 4,
+   "real_knock_on_flights": 3087,
+   "predicted": 1585,
+   "caught": 1503,
+   "recall": 0.487,
+   "precision": 0.948,
+   "mae_minutes_on_caught": 30.2
+  },
+  {
+   "hops": 8,
+   "real_knock_on_flights": 3087,
+   "predicted": 1588,
+   "caught": 1505,
+   "recall": 0.488,
+   "precision": 0.948,
+   "mae_minutes_on_caught": 30.2
+  }
+ ]
+}
