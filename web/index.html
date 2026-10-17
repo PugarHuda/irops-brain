@@ -92,6 +92,11 @@
     <p>US DOT records how many minutes of each flight's delay came from its aircraft arriving late. We seed the graph with
       only each flight's own weather, air-traffic and carrier delay, let it propagate along aircraft rotations, and compare.</p>
     <table id="backtest"></table>
+    <h3>The agents' own calls, against what the airline really did</h3>
+    <p>Each scenario is run as the agents would at its clock. A cancel is borne out if the airline also cancelled the
+      flight or flew it 3h+ late. Projected 3h+ delays (the 14 CFR 260.6 refund line) are checked against real arrivals,
+      and compared with the base rate among every flight downstream of the known delays.</p>
+    <table id="decisions"></table>
     <div id="compare" class="compare"></div>
   </section>
 

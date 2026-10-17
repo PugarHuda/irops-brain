@@ -60,5 +60,46 @@
    "precision": 0.869,
    "mae_minutes_on_caught": 26.6
   }
+ ],
+ "decisions": [
+  {
+   "scenario": "den-elliott",
+   "airline": "WN",
+   "cancels_proposed": 5,
+   "airline_also_cancelled": 2,
+   "cancels_cancelled_or_3h_late": 3,
+   "projected_3h_late": 24,
+   "really_3h_late_or_cancelled": 13,
+   "precision": 0.542,
+   "reachable_flights": 105,
+   "base_rate": 0.524,
+   "lift": 1.03
+  },
+  {
+   "scenario": "mdw-elliott",
+   "airline": "WN",
+   "cancels_proposed": 0,
+   "airline_also_cancelled": 0,
+   "cancels_cancelled_or_3h_late": 0,
+   "projected_3h_late": 0,
+   "really_3h_late_or_cancelled": 0,
+   "precision": null,
+   "reachable_flights": 6,
+   "base_rate": 0.833,
+   "lift": null
+  },
+  {
+   "scenario": "sea-ice",
+   "airline": "AS",
+   "cancels_proposed": 2,
+   "airline_also_cancelled": 0,
+   "cancels_cancelled_or_3h_late": 0,
+   "projected_3h_late": 0,
+   "really_3h_late_or_cancelled": 0,
+   "precision": null,
+   "reachable_flights": 97,
+   "base_rate": 0.515,
+   "lift": null
+  }
  ]
 }

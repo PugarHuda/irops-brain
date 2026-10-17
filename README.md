@@ -64,6 +64,23 @@ same or better precision.
 Recall is capped mainly by delay chains that started before 21 Dec (outside the loaded window) and flights with no tail
 number in the DOT file.
 
+### The agents' own calls, against what the airline did
+
+The same script runs each scenario as the agents would at its clock and scores their output against what happened
+after it:
+
+| Scenario | Cancels proposed | Airline also cancelled | Cancelled or 3h+ late | Projected 3h+ late | Really 3h+ late or cancelled | Base rate downstream |
+|---|---|---|---|---|---|---|
+| Denver (WN) | 5 | 2 | 3 | 24 | 13 (54%) | 52% of 105 |
+| Midway (WN) | 0 | 0 | 0 | 0 | 0 | 83% of 6 |
+| Seattle (AS) | 2 | 0 | 0 | 0 | 0 | 52% of 97 |
+
+The honest reading: the knock-on model is accurate about delay that is already in the system (the table above), but at
+08:00 in Denver it cannot see the storm's *new* delays still to come. Its 3h+ calls are right 54% of the time against
+a 52% base rate downstream: no better than "everything downstream of a delayed hub goes bad". Seattle's two cancel
+proposals come from crews with no legal reserve on hand, and Alaska flew both less than 3h late: the agents were more
+conservative than the airline there.
+
 ## Graph data model
 
 ```

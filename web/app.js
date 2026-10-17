@@ -296,7 +296,7 @@ $("ask-form").addEventListener("submit", async (ev) => {
 
 // ---------- proof ----------
 async function loadProof() {
-  const { results } = await api("/api/backtest");
+  const { results, decisions } = await api("/api/backtest");
   if (!results.length) return;
   const head = el("tr", {}, ["Airline", "Traversal depth", "Real knock-on delays", "Caught", "Recall", "Precision", "Mean error"].map((h) => el("th", {}, h)));
   const best = {};
@@ -306,6 +306,15 @@ async function loadProof() {
       el("td", {}, r.hops === 1 ? "1 hop (previous leg only)" : `${r.hops} hops`),
       el("td", {}, fmt(r.real_knock_on_flights)), el("td", {}, fmt(r.caught)), el("td", {}, `${Math.round(r.recall * 100)}%`),
       el("td", {}, `${Math.round(r.precision * 100)}%`), el("td", {}, `${r.mae_minutes_on_caught} min`)))));
+  const pct = (v) => (v == null ? "—" : `${Math.round(v * 100)}%`);
+  const sc = Object.fromEntries(scenarios.map((s) => [s.id, s.title]));
+  const dh = el("tr", {}, ["Scenario", "Cancels proposed", "Airline also cancelled", "Cancelled or 3h+ late",
+    "Projected 3h+ late", "Really 3h+ late or cancelled", "Base rate downstream"].map((h) => el("th", {}, h)));
+  $("decisions").replaceChildren(el("thead", {}, dh), el("tbody", {}, (decisions || []).map((d) => el("tr", {},
+    el("td", {}, sc[d.scenario] || d.scenario), el("td", {}, fmt(d.cancels_proposed)), el("td", {}, fmt(d.airline_also_cancelled)),
+    el("td", {}, fmt(d.cancels_cancelled_or_3h_late)), el("td", {}, fmt(d.projected_3h_late)),
+    el("td", {}, `${fmt(d.really_3h_late_or_cancelled)} (${pct(d.precision)})`),
+    el("td", {}, `${pct(d.base_rate)} of ${fmt(d.reachable_flights)}`)))));
 }
 
 async function loadCompare(root) {
