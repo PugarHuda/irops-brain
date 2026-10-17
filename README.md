@@ -189,7 +189,9 @@ irops/llm.py       OpenRouter free models over the same tools + answer validator
 irops/mcp_server.py the read-only catalogue as an MCP server (stdio, and /mcp/ in the API)
 irops/live.py      FAA NAS status + aviationweather METAR -> (:Live) nodes in each airline graph
 irops/api.py       FastAPI;  web/  single-page UI (cytoscape.js)
-eval/backtest.py   prediction vs DOT LateAircraftDelay
+eval/backtest.py   prediction vs DOT LateAircraftDelay; the agents' own calls vs what the airline did
+video/             the demo video as code: edge-tts voice-over + word timings, Playwright recording, Remotion
+.github/workflows  keep-warm: pings the free backend every 10 min so visitors never meet a cold start
 tests/test_irops.py invariants: crew legality, slack propagation, claim race, read-only, no routing via cancelled
                    flights, atomic + verified + exactly reversible approvals, tenant isolation, MCP, constraints
 ```
@@ -223,13 +225,28 @@ uv run uvicorn irops.api:app --port 8000   # open http://localhost:8000
 
 Optional: `export OPENROUTER_API_KEY=...` to have a free OpenRouter model answer free-form questions through the same tools
 (the briefing is built from the graph numbers, so a run never waits on an LLM). The free tier allows about 50
-requests a day without account credits; past that, answers come from the intent router and say so. Requests use OpenRouter's `models` fallback routing over free tool-calling models
+requests a day without account credits, so each visitor gets 6 LLM questions an hour and a 429 pauses the LLM for
+10 minutes; past that, answers come from the intent router and say so. Requests use OpenRouter's `models` fallback routing over free tool-calling models
 (default `poolside/laguna-s-2.1:free`, then two Nemotron models; override with `OPENROUTER_MODELS`), so one busy free
 model does not fail the request. Without a key, or if every model is down, questions go through a small intent router
 and the answer says so.
 Against FalkorDB Cloud, set `FALKORDB_HOST`, `FALKORDB_PORT`, `FALKORDB_USERNAME`, `FALKORDB_PASSWORD`.
 
 The FalkorDB Browser is at http://localhost:3000 to explore the graph (graph `irops_WN`).
+
+### The demo video
+
+The video is generated from this repo, against the live app:
+
+```bash
+cd video && npm ci
+npm run tts      # Microsoft neural voice (edge-tts) per scene + word timings -> public/*.mp3, timing.json
+npm run record   # Playwright drives https://irops-brain.vercel.app, long waits marked as cuts -> public/screen.webm
+npm run render   # Remotion: title cards, the recording, karaoke subtitles from the word timings -> out/*.mp4
+```
+
+The narration is `video/narration.json`. Every screen in the video is the real app doing the real thing; the waits for
+the agents' run are cut out, nothing else is edited.
 
 ## AI assistance disclosure
 
@@ -242,4 +259,6 @@ the results against DOT data, and can explain every query above.
 - US DOT Bureau of Transportation Statistics, Reporting Carrier On-Time Performance (public domain).
 - OpenFlights airports database (Open Database License).
 - Live: FAA NAS Status (nasstatus.faa.gov) and NOAA aviationweather.gov METAR (US government, public).
-- Regulations: 14 CFR Part 117 (eCFR). Not affiliated with, or endorsed by, any airline.
+- Regulations: 14 CFR Part 117 (eCFR), 14 CFR 260.6 (refunds). Not affiliated with, or endorsed by, any airline.
+- Voice-over: Microsoft Edge neural text-to-speech (en-US-AndrewMultilingualNeural) via edge-tts. UI look inspired by
+  Halo Lab's "BLITZ" agency landing page on Dribbble.
