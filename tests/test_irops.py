@@ -180,7 +180,7 @@ def refunds_and_rejections_are_remembered():
     assert agents.reject(p["id"])["ok"]
     again = next(x for x in agents.run("den-elliott")["proposals"] if x["action"] == p["action"])
     assert again["status"] == "withheld" and "rejected" in again["summary"], again
-    assert not agents.approve(again["id"])["ok"]
+    assert "withheld" in agents.approve(again["id"])["reason"]
     t.reset_ops(forget_rejections=True)  # the operator's reset: the rejection stops withholding
     fresh = next(x for x in agents.run("den-elliott")["proposals"] if x["action"] == p["action"])
     assert fresh["status"] == "proposed", fresh

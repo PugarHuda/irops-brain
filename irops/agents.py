@@ -178,7 +178,7 @@ def approve(decision_id, tenant="irops_WN"):
     t = Tools(tenant)
     d = t.take_decision(decision_id)  # atomic: a double click or a second approver cannot run it twice
     if not d:
-        return {"ok": False, "reason": "not an open proposal (already decided, or superseded by a newer run)"}
+        return {"ok": False, "reason": not_open(t, decision_id)}
     act = json.loads(d["action"])
     op = act["op"]
     try:
@@ -206,10 +206,18 @@ def approve(decision_id, tenant="irops_WN"):
                                             "cypher": check["cypher"], "reason": check.get("reason")}}
 
 
+def not_open(t, decision_id):
+    r = t._run("MATCH (d:Decision {id: $id}) RETURN d.status AS s", {"id": decision_id})
+    s = r[0]["s"] if r else None
+    return {None: "no such proposal in this airline's graph",
+            "withheld": "withheld: a human already rejected this exact action; reset to propose it again",
+            "superseded": "superseded by a newer run or a reset"}.get(s, f"already {s}" if s else "")
+
+
 def reject(decision_id, tenant="irops_WN"):
     t = Tools(tenant)
     if not t.take_decision(decision_id):
-        return {"ok": False, "reason": "not an open proposal (already decided, or superseded by a newer run)"}
+        return {"ok": False, "reason": not_open(t, decision_id)}
     t.set_decision(decision_id, "rejected")
     return {"ok": True}
 
@@ -220,7 +228,8 @@ def brief(sc, summ, proposals, lessons):
     # most of the free OpenRouter quota, and the number check rejected half the drafts. The LLM answers questions.
     kinds = {}
     for p in proposals:
-        kinds[p["kind"]] = kinds.get(p["kind"], 0) + 1
+        if p["status"] == "proposed":
+            kinds[p["kind"]] = kinds.get(p["kind"], 0) + 1
     lines = [f"{sc['title']}. {summ.get('roots', 0)} flights already late are projected to delay "
              f"{summ.get('downstream_flights', 0)} more ({summ.get('pax_delayed', 0):,} passengers), break "
              f"{int(summ.get('pax_misconnecting', 0)):,} passenger connections and push {summ.get('crews_illegal', 0)} "

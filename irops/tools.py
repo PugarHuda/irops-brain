@@ -413,7 +413,7 @@ class Tools:
         start = len(self.trace)
         # the same lesson learned again is counted, not duplicated
         self._run("""MERGE (l:Lesson {text: $t}) ON CREATE SET l.first_at = $at
-            SET l.at = $at, l.session = $s, l.seen = coalesce(l.seen, 0) + 1 WITH l
+            SET l.at = $at, l.session = $s, l.seen = toInteger(coalesce(l.seen, 0)) + 1 WITH l
             MATCH (x) WHERE (x:Airport AND x.code IN $about) OR (x:Flight AND x.id IN $about) MERGE (l)-[:ABOUT]->(x)""",
                   {"t": text, "at": self.now(), "s": session, "about": list(about)}, write=True)
         return self._result("answered", start=start)
