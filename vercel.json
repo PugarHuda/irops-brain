@@ -1,0 +1,14 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "installCommand": "",
+  "buildCommand": "",
+  "outputDirectory": "web",
+  "rewrites": [
+    { "source": "/static/:path*", "destination": "/:path*" },
+    { "source": "/api/:path*", "destination": "https://irops-brain.onrender.com/api/:path*" },
+    { "source": "/mcp", "destination": "https://irops-brain.onrender.com/mcp/" },
+    { "source": "/mcp/", "destination": "https://irops-brain.onrender.com/mcp/" },
+    { "source": "/mcp/:path*", "destination": "https://irops-brain.onrender.com/mcp/:path*" }
+  ]
+}

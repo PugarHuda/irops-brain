@@ -5,29 +5,48 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>IROPS Brain</title>
 <meta name="description" content="Airline meltdown recovery agents reasoning over a FalkorDB graph of real US DOT flights: delay propagation, legal crew cover, passenger re-routing, human-approved and verified.">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Crect width=%2716%27 height=%2716%27 fill=%27%2314233B%27/%3E%3Cpath d=%27M3 11l10-6M3 5l10 6%27 stroke=%27%23A3195B%27 stroke-width=%272%27/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Crect width=%2716%27 height=%2716%27 fill=%27%23000%27/%3E%3Cpath d=%27M3 11l10-6M3 5l10 6%27 stroke=%27%23F7A5C8%27 stroke-width=%272%27/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Barlow+Condensed:wght@500;600;700&family=JetBrains+Mono:wght@400&display=optional">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;800;900&family=JetBrains+Mono:wght@400&display=optional">
 <link rel="stylesheet" href="/static/style.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/cytoscape/3.30.2/cytoscape.min.js" integrity="sha384-IWROdLKRsN1UuJywMlWl7/blXQ8GEooN2n7dzTxfEPd7ybYIKCUJ2Ol/1Gpf3YV4" crossorigin="anonymous"></script>
 </head>
 <body>
-<header class="bar">
-  <div class="brand">
-    <h1>IROPS Brain</h1>
-    <p>Recovery agents for airline irregular operations, reasoning over a FalkorDB graph of real flights.</p>
-  </div>
-  <div class="controls">
-    <label for="scenario">Scenario</label>
-    <select id="scenario"></select>
-    <button id="run" class="primary">Run the agents</button>
-  </div>
-  <div class="clock" aria-live="polite">
-    <span id="clock-time">--:--</span>
-    <span id="clock-zone">Pick a scenario</span>
-  </div>
+<div class="frame">
+<header class="nav">
+  <a class="wordmark" href="#top" id="top">IROPS BRAIN</a>
+  <nav aria-label="Sections">
+    <a href="#ev-title">Evidence</a><a href="#board-title">Proposals</a><a href="#live-title">Live</a>
+    <a href="#proof-title">Proof</a><a href="#mcp-title">MCP</a>
+  </nav>
+  <a class="pill" href="https://github.com/PugarHuda/irops-brain" rel="noopener">Source on GitHub</a>
 </header>
+
+<section class="hero" aria-label="Run a scenario">
+  <div class="hero-main">
+    <h1>Untangle the meltdown</h1>
+    <svg class="arrow" viewBox="0 0 120 60" aria-hidden="true"><path d="M6 46 C 30 6, 70 4, 98 26" fill="none" stroke="#F1DC5B" stroke-width="12" stroke-linecap="round"/><path d="M84 8 L112 32 L78 40 Z" fill="#F1DC5B"/></svg>
+    <p class="lede">Recovery agents for airline irregular operations, reasoning over a FalkorDB graph of real US DOT flights.
+      They propose; you approve; the graph checks every change.</p>
+    <div class="controls">
+      <label for="scenario">Scenario</label>
+      <select id="scenario"></select>
+      <div class="cta-row">
+        <button id="run" class="cta">Run the agents</button>
+        <a class="round" href="#ask-title" aria-label="Ask the graph a question" title="Ask the graph"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z" fill="currentColor"/></svg></a>
+      </div>
+    </div>
+  </div>
+  <div class="hero-side">
+    <span class="glyph g1" aria-hidden="true">&#10033;</span><span class="glyph g2" aria-hidden="true">&#9680;</span><span class="glyph g3" aria-hidden="true">&#8857;</span>
+    <div class="clock" aria-live="polite">
+      <span class="clock-label">Simulation clock</span>
+      <span id="clock-time">--:--</span>
+      <span id="clock-zone">Pick a scenario</span>
+    </div>
+  </div>
+</section>
 
 <main>
   <section class="story" aria-labelledby="story-title">
@@ -111,6 +130,7 @@
 </main>
 <footer>Flight data: US DOT BTS On-Time Performance, Dec 2022 (public). Crews and bookings are synthetic, generated on the real
   schedule. Rules: 14 CFR Part 117. Not affiliated with any airline.</footer>
+</div>
 <script src="/static/app.js"></script>
 </body>
 </html>
