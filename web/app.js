@@ -42,9 +42,9 @@ async function api(path, body) {
 const cy = cytoscape({
   container: $("cy"), minZoom: 0.2, maxZoom: 2.5,
   style: [
-    { selector: "node", style: { label: "data(label)", "text-wrap": "wrap", "font-family": "Archivo", "font-weight": 600,
-      "font-size": 13, "text-valign": "center", "text-halign": "center", color: "#000", shape: "round-rectangle",
-      width: 108, height: 52, "background-color": "#FFFFFF", "border-width": 1.5, "border-color": "#000" } },
+    { selector: "node", style: { label: "data(label)", "text-wrap": "wrap", "font-family": "Archivo, Helvetica Neue, Arial, sans-serif", "font-weight": 600,
+      "font-size": 12, "text-valign": "center", "text-halign": "center", color: "#000", shape: "round-rectangle",
+      width: 122, height: 52, "background-color": "#FFFFFF", "border-width": 1.5, "border-color": "#000" } },
     { selector: "node.root", style: { "background-color": "#000", color: "#F3F3F5" } },
     { selector: "node.late", style: { "border-color": "#D2246E", "border-width": "data(bw)", "background-color": "#FDE3EC" } },
     { selector: "node.cancelled", style: { "background-color": "#E9E9EE", "border-style": "dashed", color: "#55555F" } },
@@ -52,7 +52,7 @@ const cy = cytoscape({
     { selector: "node.Crew", style: { shape: "tag", "background-color": "#3346C8", color: "white", width: 80, height: 34 } },
     { selector: "edge", style: { width: 2.5, "curve-style": "bezier", "target-arrow-shape": "triangle",
       "line-color": "#000", "target-arrow-color": "#000", label: "data(label)", "font-size": 11,
-      "font-family": "Archivo", "text-background-color": "#fff", "text-background-opacity": 0.9,
+      "font-family": "Archivo, Helvetica Neue, Arial, sans-serif", "text-background-color": "#fff", "text-background-opacity": 0.9,
       "text-background-padding": 2, color: "#55555F" } },
     { selector: "edge.CREW_NEXT, edge.ASSIGNED", style: { "line-color": "#3346C8", "target-arrow-color": "#3346C8", "line-style": "dashed" } },
     { selector: "edge.PAX_CONNECT, edge.CONN", style: { "line-color": "#D2246E", "target-arrow-color": "#D2246E", "line-style": "dotted" } },
