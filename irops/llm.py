@@ -97,7 +97,10 @@ def ask(question, tenant="irops_WN"):
 
 
 def _ask_llm(question, t: Tools):
-    messages = [{"role": "system", "content": SYSTEM}, {"role": "user", "content": question}]
+    now = t.now()
+    clock = (f"\nSimulation clock: {hhmm(now)} UTC ({(EPOCH + timedelta(minutes=now)):%Y-%m-%d}). 'Now' and 'today' mean "
+             f"this moment, not the real date. Airline graph: {t.tenant} (flight numbers start with {t.carrier}).")
+    messages = [{"role": "system", "content": SYSTEM + clock}, {"role": "user", "content": question}]
     calls, model, msg = [], None, {}
     seen = set(IDS.findall(question.upper().translate(DASHES)))  # ids the user typed may be named back to them
     for _ in range(8):
@@ -134,17 +137,25 @@ def _ask_llm(question, t: Tools):
 
 
 def briefing(facts):
+    """LLM briefing, checked: every number in it must appear in the facts. One rewrite with the offending numbers
+    named; if it still invents or rounds a number, the caller uses the template briefing."""
+    known = set(re.findall(r"\d+", json.dumps(facts, default=str).replace(",", "")))  # "1,026" in the story
+    messages = [{"role": "user", "content":
+                 "Write a 4-6 sentence briefing for the duty manager from these facts only. Plain text. "
+                 "Lead with the impact, then what the agents propose, then anything remembered from earlier "
+                 "sessions. Copy every number exactly as it appears in the facts: never round, estimate or add one."
+                 "\n\n" + json.dumps(facts, default=str)}]
     try:
-        data = _chat([{"role": "user", "content":
-                       "Write a 4-6 sentence briefing for the duty manager from these facts only. Plain text. "
-                       "Lead with the impact, then what the agents propose, then anything remembered from "
-                       "earlier sessions. No numbers that are not in the facts.\n\n" + json.dumps(facts, default=str)}])
-        text = _text(data["choices"][0]["message"])
-        # a number the facts do not contain is an invented number: fall back to the template briefing
-        known = set(re.findall(r"\d+", json.dumps(facts, default=str)))
-        if not text or set(re.findall(r"\d+", text.replace(",", ""))) - known:
-            return None
-        return {"text": text, "model": data.get("model")}
+        for _ in range(2):
+            data = _chat(messages)
+            text = _text(data["choices"][0]["message"])
+            extra = set(re.findall(r"\d+", text.replace(",", ""))) - known
+            if text and not extra:
+                return {"text": text, "model": data.get("model")}
+            messages += [{"role": "assistant", "content": text},
+                         {"role": "user", "content": f"These numbers are not in the facts: {', '.join(sorted(extra))}. "
+                                                     "Rewrite using only numbers that appear in the facts, exactly."}]
+        return None
     except Exception:
         return None  # the template briefing still works
 

@@ -181,7 +181,9 @@ async function run() {
     $("story").textContent = `${r.scenario.story} Known so far: ${r.known.delayed} departures late, ${r.known.cancelled} cancelled.`;
     const b = $("briefing");
     b.hidden = false;
-    b.textContent = r.briefing.text;
+    b.replaceChildren(r.briefing.text, el("small", { class: "by" }, r.briefing.by === "template"
+      ? "Template briefing: built from the graph numbers (no LLM draft passed the number check)."
+      : `Written by ${r.briefing.by}; every number checked against the graph.`));
     renderImpact(r.summary);
     renderStrips(r.proposals.map((p) => ({ ...p, tenant: r.tenant })));
     renderTrace(r.steps);

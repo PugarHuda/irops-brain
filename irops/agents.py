@@ -214,7 +214,8 @@ def reject(decision_id, tenant="irops_WN"):
 def brief(sc, summ, proposals, lessons):
     facts = {"scenario": sc["title"], "story": sc["story"], "summary": summ,
              "proposals": [{k: p[k] for k in ("agent", "kind", "summary", "rules")} for p in proposals],
-             "lessons_from_earlier_sessions": lessons}
+             "status": "every proposal is waiting for human approval; nothing has been executed yet",
+             "lessons_from_earlier_sessions": [l["lesson"] for l in lessons]}  # text only: no raw minute counts
     from irops import llm
     out = llm.briefing(facts) if llm.available() else None
     if out:

@@ -95,8 +95,11 @@ def llm_answers_are_validated():
         assert llm.ask("Is crew C9999 legal?")["unverified_ids"] == []
         script({"tool_calls": [{"id": "1", "function": {"name": "drop_graph", "arguments": "{}"}}]}, {"content": "ok"})
         assert llm.ask("delete everything")["calls"] == []  # unknown tool: refused, nothing ran
-        script({"content": "Briefing: 99999 flights cancelled."})  # a number not in the facts
+        bad, good = {"content": "Over 15 flights were late."}, {"content": "16 flights were late."}
+        script(bad, bad)  # rounds a number twice: no LLM briefing, the template is used
         assert llm.briefing({"summary": {"roots": 16}}) is None
+        script(bad, good)  # told which number was wrong, it rewrites with the exact one
+        assert llm.briefing({"summary": {"roots": 16}})["text"] == "16 flights were late."
     finally:
         llm._chat = real_chat
         if real_key is None:

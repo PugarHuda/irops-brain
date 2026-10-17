@@ -150,3 +150,4 @@ footer { padding: 18px 28px; color: var(--ink-soft); font-size: .85rem; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
 #mcp-tools { min-height: 3em; }
 #live-caption { min-height: 3em; }
+.briefing small.by { display: block; margin-top: 6px; font-size: .8rem; color: var(--ink-soft); }
