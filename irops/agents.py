@@ -6,7 +6,7 @@ locks, Lesson nodes are what the next session remembers. Every proposal carries
 the graph path that justifies it, and nothing changes the operation until a
 human approves it.
 
-The policy is deterministic (same graph -> same plan). Claude, when an API key
+The policy is deterministic (same graph -> same plan). An LLM (OpenRouter free models), when a key
 is present, writes the briefing and answers questions through the same tools.
 """
 import json
@@ -210,15 +210,15 @@ def reject(decision_id, tenant="irops_WN"):
     return {"ok": True}
 
 
-# -- Claude: briefing and questions over the same tools ---------------------
+# -- LLM: briefing and questions over the same tools ---------------------
 def brief(sc, summ, proposals, lessons):
     facts = {"scenario": sc["title"], "story": sc["story"], "summary": summ,
              "proposals": [{k: p[k] for k in ("agent", "kind", "summary", "rules")} for p in proposals],
              "lessons_from_earlier_sessions": lessons}
     from irops import llm
-    text = llm.briefing(facts) if llm.available() else None
-    if text:
-        return {"by": "claude", "text": text}
+    out = llm.briefing(facts) if llm.available() else None
+    if out:
+        return {"by": out["model"] or "llm", "text": out["text"]}
     kinds = {}
     for p in proposals:
         kinds[p["kind"]] = kinds.get(p["kind"], 0) + 1

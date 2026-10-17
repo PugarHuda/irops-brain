@@ -598,9 +598,3 @@ CATALOGUE = {
     "recall": ("Earlier decisions and lessons about a flight, crew, airport or booking.",
                {"about": {"type": "string"}}, ["about"]),
 }
-
-
-def tool_specs():
-    return [{"name": n, "description": d, "strict": True,
-             "input_schema": {"type": "object", "properties": p, "required": r, "additionalProperties": False}}
-            for n, (d, p, r) in CATALOGUE.items()]

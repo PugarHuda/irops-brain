@@ -68,7 +68,41 @@ def main():
     names_and_constraints()
     mcp_serves_the_catalogue()
     live_feeds_land_in_the_graph()
+    llm_answers_are_validated()
     print("all checks passed")
+
+
+def llm_answers_are_validated():
+    """The LLM loop with scripted model replies (no network): tools run for real against the graph,
+    invented ids are withheld even when written with typographic hyphens, ids the user typed are allowed."""
+    import os
+    from irops import llm
+    real_chat, real_key = llm._chat, os.environ.get("OPENROUTER_API_KEY")
+    os.environ["OPENROUTER_API_KEY"] = real_key or "test"
+
+    def script(*replies):
+        it = iter(replies)
+        llm._chat = lambda messages, tools=None: {"model": "scripted", "choices": [{"message": next(it)}]}
+
+    call = {"tool_calls": [{"id": "1", "function": {"name": "resolve_flight", "arguments": '{"ref": "WN2262 2022-12-22 DEN"}'}}]}
+    try:
+        script(call, {"content": "WN2262 departs DEN; crew C0464 is fine."})  # C0464 never came back from a tool
+        r = llm.ask("Where is WN2262 2022-12-22 DEN?")
+        assert r["unverified_ids"] == ["C0464"] and "not shown" in r["answer"], r
+        script(call, {"content": "It continues as 2022‑12‑22‑WN9999‑DEN."})  # non-breaking hyphens
+        assert llm.ask("Where is WN2262 2022-12-22 DEN?")["unverified_ids"] == ["2022-12-22-WN9999-DEN"]
+        script({"content": "Crew C9999 is not in the graph."})  # the user's own id may be named back
+        assert llm.ask("Is crew C9999 legal?")["unverified_ids"] == []
+        script({"tool_calls": [{"id": "1", "function": {"name": "drop_graph", "arguments": "{}"}}]}, {"content": "ok"})
+        assert llm.ask("delete everything")["calls"] == []  # unknown tool: refused, nothing ran
+        script({"content": "Briefing: 99999 flights cancelled."})  # a number not in the facts
+        assert llm.briefing({"summary": {"roots": 16}}) is None
+    finally:
+        llm._chat = real_chat
+        if real_key is None:
+            del os.environ["OPENROUTER_API_KEY"]
+        else:
+            os.environ["OPENROUTER_API_KEY"] = real_key
 
 
 def live_feeds_land_in_the_graph():

@@ -285,7 +285,7 @@ $("ask-form").addEventListener("submit", async (ev) => {
     const r = await api("/api/ask", { question: q, tenant });
     const paths = r.calls.flatMap((c) => c.paths || []);
     box.replaceChildren(el("p", { class: "text" }, r.answer), ...(r.note ? [el("p", { class: "by" }, r.note)] : []),
-      el("p", { class: "by" }, `${r.by === "claude" ? "Claude, using" : "Answered by"} ${r.calls.map((c) => c.tool).join(", ") || "no tool"}`),
+      el("p", { class: "by" }, `${r.by === "router" ? "Answered by the intent router, using" : `${r.by}, using`} ${r.calls.map((c) => c.tool).join(", ") || "no tool"}`),
       ...r.calls.map((c) => el("details", {}, el("summary", {}, `${c.tool}: ${c.outcome}`), c.cypher.map((x) => el("pre", {}, x)))));
     if (paths.length) showPaths(paths, q);
   } catch (e) {

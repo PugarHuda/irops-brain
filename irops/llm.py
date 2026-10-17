@@ -1,19 +1,25 @@
-"""Claude over the fixed tool catalogue. The model picks tools and fills arguments;
-it never writes Cypher. Its answer is checked: every flight, crew, reserve or booking
-id it mentions must have come back from a tool, or the answer is replaced by the rows.
+"""An LLM over the fixed tool catalogue, through OpenRouter's free models. The model picks tools
+and fills arguments; it never writes Cypher. Its answer is checked: every flight, crew, reserve
+or booking id it mentions must have come back from a tool, or the answer is replaced by the rows.
 
-Without ANTHROPIC_API_KEY, questions go through a small intent router to the same tools.
+Without OPENROUTER_API_KEY (or when every model is down), questions go through a small intent
+router to the same tools, and the answer says so.
 """
 import json
 import os
 import re
-
 from datetime import timedelta
 
-from irops.ingest import EPOCH
-from irops.tools import Tools, tool_specs
+import httpx
 
-MODEL = "claude-opus-5-5"
+from irops.ingest import EPOCH
+from irops.tools import CATALOGUE, Tools, hhmm
+
+URL = "https://openrouter.ai/api/v1/chat/completions"
+# Free models that support tool calling. OpenRouter tries them in order (its `models` fallback routing),
+# so a rate-limited or offline free model does not fail the request. Override with OPENROUTER_MODELS.
+MODELS = os.getenv("OPENROUTER_MODELS", "poolside/laguna-s-2.1:free,nvidia/nemotron-3-super-120b-a12b:free,"
+                   "nvidia/nemotron-3-ultra-550b-a55b:free").split(",")
 IDS = re.compile(r"\b(2022-12-\d\d-[A-Z0-9]{2}\d+-[A-Z]{3}|R-[A-Z]{3}-\d{3}|C\d{4}|B\d{5})\b")
 
 SYSTEM = """You are the duty manager's analyst in an airline operations control centre during
@@ -21,36 +27,61 @@ irregular operations. The airline's live state is a FalkorDB graph you can only 
 
 Rules:
 - Every fact you state must come from a tool result in this conversation. Quote flight, crew,
-  reserve and booking ids exactly as tools returned them.
+  reserve and booking ids exactly as tools returned them. Never guess an id.
 - When a tool's outcome is "not_in_graph", say the graph has no record of it. That is different
   from "nothing is affected". When it is "unknown_entity", say the id was not found.
 - Explain *why* using the returned paths (e.g. "same aircraft N8642Q", "crew C0464 continues on").
-- Be brief: a duty manager reads this between phone calls."""
+- Be brief: a duty manager reads this between phone calls. Plain text, no markdown tables."""
 
 
 def available():
-    return bool(os.getenv("ANTHROPIC_API_KEY"))
+    return bool(os.getenv("OPENROUTER_API_KEY"))
 
 
-def _client():
-    import anthropic
-    return anthropic.Anthropic()
+def tool_specs():
+    return [{"type": "function", "function": {"name": n, "description": d, "parameters": {
+        "type": "object", "properties": p, "required": r, "additionalProperties": False}}}
+        for n, (d, p, r) in CATALOGUE.items()]
 
 
-def _create(client, **kw):
-    # Server-side fallback: if a safety classifier declines, the API re-runs on a fallback model.
-    return client.beta.messages.create(model=MODEL, betas=["server-side-fallback-2026-07-01"],
-                                       fallbacks="default", output_config={"effort": "medium"}, **kw)
+def _chat(messages, tools=None):
+    body = {"models": MODELS, "messages": messages, "max_tokens": 2000, "temperature": 0.2,
+            "reasoning": {"exclude": True}}  # free reasoning models: keep their thinking out of the answer
+    if tools:
+        body["tools"] = tools
+    r = httpx.post(URL, json=body, timeout=90, headers={
+        "Authorization": f"Bearer {os.environ['OPENROUTER_API_KEY']}",
+        "HTTP-Referer": "https://irops-brain.onrender.com", "X-Title": "IROPS Brain"})
+    r.raise_for_status()
+    data = r.json()
+    if "error" in data:  # OpenRouter can return 200 with an error body when every model failed
+        raise RuntimeError(str(data["error"])[:200])
+    return data
+
+
+TIME_KEYS = {"dep", "arr", "arrives", "on_call_to", "on_call_from", "duty_start", "at", "planned_arr"}
+DASHES = str.maketrans({c: "-" for c in "\u2010\u2011\u2012\u2013\u2014\u2212"})
+
+
+def _readable(row):
+    # times are minutes since 2022-12-21 00:00 UTC in the graph; a model must never see (or repeat) the raw number
+    return {k: (hhmm(v) + " UTC" if k in TIME_KEYS and isinstance(v, (int, float)) and v > 0 else v)
+            for k, v in row.items()} if isinstance(row, dict) else row
 
 
 def _compact(res):
-    """What the model sees from a tool: rows and a readable rendering of each path."""
+    """What the model sees from a tool: rows with readable times, and a readable rendering of each path."""
     out = {k: v for k, v in res.items() if k not in ("cypher", "paths")}
-    out["rows"] = res.get("rows", [])[:25]
+    out["rows"] = [_readable(r) for r in res.get("rows", [])[:25]]
     out["paths"] = [" -> ".join(f"{n['key']}" for n in p["nodes"]) + "  via " +
                     ", ".join(f"{e['type']}({e.get('tail') or e.get('crew') or ''})" for e in p["edges"])
                     for p in res.get("paths", [])[:10]]
     return json.dumps(out, default=str)[:12000]
+
+
+def _text(msg):
+    # strip reasoning, and normalise typographic hyphens so ids like 2022-12-22-WN2262-DEN cannot dodge the validator
+    return re.sub(r"<think>.*?</think>", "", msg.get("content") or "", flags=re.S).translate(DASHES).strip()
 
 
 def ask(question, tenant="irops_WN"):
@@ -58,53 +89,62 @@ def ask(question, tenant="irops_WN"):
     if not available():
         return route(question, t)
     try:
-        return _ask_claude(question, t)
-    except Exception as e:  # API down, rate limit, bad key: answer from the same tools, and say why
+        return _ask_llm(question, t)
+    except Exception as e:  # rate limit, every free model busy, bad key: answer from the same tools, and say why
         out = route(question, t)
-        out["note"] = f"Claude unavailable ({type(e).__name__}); answered by the intent router."
+        out["note"] = f"LLM unavailable ({type(e).__name__}: {str(e)[:120]}); answered by the intent router."
         return out
 
 
-def _ask_claude(question, t: Tools):
-    client = _client()
-    messages = [{"role": "user", "content": question}]
-    calls, seen = [], set()
+def _ask_llm(question, t: Tools):
+    messages = [{"role": "system", "content": SYSTEM}, {"role": "user", "content": question}]
+    calls, model, msg = [], None, {}
+    seen = set(IDS.findall(question.upper().translate(DASHES)))  # ids the user typed may be named back to them
     for _ in range(8):
-        r = _create(client, max_tokens=16000, system=SYSTEM, tools=tool_specs(), messages=messages)
-        if r.stop_reason == "refusal":
-            return {"by": "claude", "answer": "The model declined this request.", "calls": calls}
-        if r.stop_reason != "tool_use":
+        data = _chat(messages, tool_specs())
+        model = data.get("model", model)
+        msg = data["choices"][0]["message"]
+        tool_calls = msg.get("tool_calls") or []
+        if not tool_calls:
             break
-        messages.append({"role": "assistant", "content": r.content})
-        results = []
-        for b in r.content:
-            if b.type != "tool_use":
-                continue
+        messages.append({"role": "assistant", "content": msg.get("content") or "", "tool_calls": tool_calls})
+        for tc in tool_calls:
+            name = tc["function"]["name"]
             try:
-                res = getattr(t, b.name)(**b.input)
-                body, err = _compact(res), False
+                if name not in CATALOGUE:
+                    raise ValueError(f"no tool named {name}")
+                args = json.loads(tc["function"].get("arguments") or "{}")
+                res = getattr(t, name)(**args)
+                body = _compact(res)
                 seen |= set(IDS.findall(json.dumps(res, default=str)))
-                calls.append({"tool": b.name, "args": b.input, "outcome": res["outcome"], "rows": res["rows"][:12],
+                calls.append({"tool": name, "args": args, "outcome": res["outcome"], "rows": res["rows"][:12],
                               "paths": res["paths"][:12], "cypher": res["cypher"]})
-            except Exception as e:  # bad arguments come back to the model as an error, not a crash
-                body, err = f"{type(e).__name__}: {e}", True
-            results.append({"type": "tool_result", "tool_use_id": b.id, "content": body, "is_error": err})
-        messages.append({"role": "user", "content": results})
-    text = "".join(b.text for b in r.content if b.type == "text")
+            except Exception as e:  # bad arguments go back to the model as an error, not a crash
+                body = f"error: {type(e).__name__}: {e}"
+            messages.append({"role": "tool", "tool_call_id": tc["id"], "content": body})
+    text = _text(msg)
+    if not text:
+        raise RuntimeError("the model returned no answer")
     invented = sorted(set(IDS.findall(text)) - seen)
     if invented:  # the model named something no tool returned: do not show it as fact
-        text = ("[answer withheld: it referenced ids no tool returned: " + ", ".join(invented) + "]\n" +
-                "\n".join(json.dumps(c["rows"][:5], default=str) for c in calls))
-    return {"by": "claude", "answer": text, "calls": calls, "unverified_ids": invented}
+        rows = [r for c in calls for r in c["rows"][:5]]
+        text = ("The model's answer named ids that no tool returned (" + ", ".join(invented) + "), so it is not shown. "
+                + ("What the graph returned: " + json.dumps(rows, default=str)[:1500] if rows else "The tools returned no rows."))
+    return {"by": model or "llm", "answer": text, "calls": calls, "unverified_ids": invented}
 
 
 def briefing(facts):
     try:
-        r = _create(_client(), max_tokens=4000, messages=[{"role": "user", "content":
-                    "Write a 4-6 sentence briefing for the duty manager from these facts only. "
-                    "Lead with the impact, then what the agents propose, then anything remembered from "
-                    "earlier sessions. No numbers that are not in the facts.\n\n" + json.dumps(facts, default=str)}])
-        return "".join(b.text for b in r.content if b.type == "text") if r.stop_reason != "refusal" else None
+        data = _chat([{"role": "user", "content":
+                       "Write a 4-6 sentence briefing for the duty manager from these facts only. Plain text. "
+                       "Lead with the impact, then what the agents propose, then anything remembered from "
+                       "earlier sessions. No numbers that are not in the facts.\n\n" + json.dumps(facts, default=str)}])
+        text = _text(data["choices"][0]["message"])
+        # a number the facts do not contain is an invented number: fall back to the template briefing
+        known = set(re.findall(r"\d+", json.dumps(facts, default=str)))
+        if not text or set(re.findall(r"\d+", text.replace(",", ""))) - known:
+            return None
+        return {"text": text, "model": data.get("model")}
     except Exception:
         return None  # the template briefing still works
 

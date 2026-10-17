@@ -164,7 +164,7 @@ irops/ingest.py    BTS + OpenFlights -> graph; synthetic crews (FDP/rest-legal) 
 irops/tools.py     the fixed tool catalogue: Cypher, argument resolution, read-only guard, paths out
 irops/agents.py    Ops / Crew / Pax agents coordinating through Handoff, Decision, CLAIMED_FOR, Lesson nodes
 irops/scenario.py  replay "what was known at time T"
-irops/llm.py       Claude over the same tools (optional) + answer validator; intent router without a key
+irops/llm.py       OpenRouter free models over the same tools + answer validator; intent router without a key
 irops/mcp_server.py the read-only catalogue as an MCP server (stdio, and /mcp/ in the API)
 irops/live.py      FAA NAS status + aviationweather METAR -> (:Live) nodes in each airline graph
 irops/api.py       FastAPI;  web/  single-page UI (cytoscape.js)
@@ -177,7 +177,9 @@ Design choices, from "how to build an agent that reasons over a graph":
 - The model never writes Cypher. It chooses from a fixed catalogue; ids are resolved against the graph first.
 - Every answer returns the traversal path, not an explanation reconstructed afterwards.
 - Outcomes are explicit: `answered`, `from_memory`, `not_in_graph` (not the same as "nothing affected"), `unknown_entity`.
-- With Claude enabled, any flight/crew/booking id in the model's answer that no tool returned is withheld.
+- With an LLM enabled, any flight/crew/booking id in the model's answer that no tool returned is withheld (typographic
+  hyphens are normalised first, so `2022‑12‑22‑WN…` cannot slip past), and a briefing with a number the facts do
+  not contain falls back to the template. Tools hand the model readable times, never raw minute counts.
 - Memory is more nodes in the same graph. One graph per airline (`IROPS_GRAPH`), so tenants are isolated by FalkorDB's
   multi-graph, not by filters.
 - Nothing changes the operation until a human approves; every approval is re-read from the graph.
@@ -199,8 +201,11 @@ uv run python -m tests.test_irops          # "all checks passed"
 uv run uvicorn irops.api:app --port 8000   # open http://localhost:8000
 ```
 
-Optional: `export ANTHROPIC_API_KEY=...` to have Claude (`claude-opus-5-5`) write the briefing and answer free-form
-questions through the same tools. Without it, everything works and questions go through a small intent router.
+Optional: `export OPENROUTER_API_KEY=...` to have a free OpenRouter model write the briefing and answer free-form
+questions through the same tools. Requests use OpenRouter's `models` fallback routing over free tool-calling models
+(default `poolside/laguna-s-2.1:free`, then two Nemotron models; override with `OPENROUTER_MODELS`), so one busy free
+model does not fail the request. Without a key, or if every model is down, questions go through a small intent router
+and the answer says so.
 Against FalkorDB Cloud, set `FALKORDB_HOST`, `FALKORDB_PORT`, `FALKORDB_USERNAME`, `FALKORDB_PASSWORD`.
 
 The FalkorDB Browser is at http://localhost:3000 to explore the graph (graph `irops_WN`).

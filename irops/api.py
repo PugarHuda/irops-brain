@@ -84,7 +84,7 @@ def index():
 @app.get("/api/scenarios")
 def scenarios():
     return {"scenarios": [{"id": k, "title": v["title"], "story": v["story"], "tenant": v["tenant"]}
-                          for k, v in SCENARIOS.items()], "claude": llm.available()}
+                          for k, v in SCENARIOS.items()], "llm": llm.available(), "models": llm.MODELS if llm.available() else []}
 
 
 @app.post("/api/run")
