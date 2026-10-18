@@ -36,12 +36,17 @@ against the graph before the query runs. That idea came from the WeMakeDevs post
   on most.
 - **Crew** looks for a reserve pilot at the airport. If none is on call there, it runs `algo.AStar` over the route
   network to find the nearest base that has one. It claims the reserve with a single check-and-create query, so two
-  agents can never win the same pilot.
+  agents can never win the same pilot. A crew that times out cannot fly the rest of its duty period either, so the
+  reserve takes over those legs too, but only as many as its own duty limit allows. The first leg nobody can fly
+  legally goes back to Ops, which proposes cancelling it.
 - **Passenger** finds re-routings with `algo.SPpaths` (k-shortest paths) over the connection network. Seats,
-  cancellations and projected delays are checked inside the query.
+  cancellations and projected delays are checked inside the query. A booking with no feasible re-routing gets a
+  refund proposal under 14 CFR 260.6, and the impact panel counts every passenger owed one: last leg 3h+ late, or a
+  leg cancelled.
 
 Every proposal cites a rule node and waits for a human to approve it. Decisions, handoffs and lessons are stored as
-nodes too. So when you run the scenario again, the agents remember what happened at Denver last time.
+nodes too. So when you run the scenario again, the agents remember what happened at Denver last time, and if a
+human rejected an action, the same action comes back as WITHHELD instead of being proposed again.
 
 ## Does it actually predict anything?
 
@@ -58,11 +63,18 @@ each flight's *own* delay and let the traversal spread it, then compared the res
 On both airlines, following the graph past the previous leg catches 24% more real knock-on delays at the same or better
 precision. Recall is 38-49%; most misses are delay chains that started before our window opened.
 
+We also scored the agents' own calls against what the airline did after the clock. In Denver, 7 of the 11 flights
+they proposed to cancel were cancelled by Southwest too or flown 3h+ late. Their 3h+ delay calls were right 54% of
+the time, against a 52% base rate downstream: at 08:00 the graph cannot see the storm's new delays still to come.
+We kept that number in the app, because a model that is only right about delay already in the system should say so.
+
 ## Approvals you can trust, and undo
 
 An approval in IROPS Brain is one atomic step from `proposed` to `executing`, so a double click or a second operator
 cannot run it twice. After the write, we read the graph back and stamp the proposal APPROVED only if the graph now
-shows the intended state. Nothing is deleted for good: a cancelled flight just loses its `:Active` label, and a
+shows the intended state. Then the impact is projected again on the changed graph, so the operator sees what the
+approval moved: one fewer crew over its limit after a reserve swap, fewer knock-on delays and more refunds owed after a
+cancel. Nothing is deleted for good: a cancelled flight just loses its `:Active` label, and a
 relieved crew's connection is retyped to `CREW_NEXT_RELIEVED`. We first tried filtering every variable-length path
 instead, and it was 90 times slower. "Undo all approvals" restores the graph exactly, and the test suite checks that
 the counts match before and after.
@@ -73,8 +85,11 @@ Alaska Airlines' Seattle ice storm runs on a second graph, `irops_AS`, with the 
 are also served as an MCP server, so you can point Claude Code at the live graph:
 
 ```
-claude mcp add --transport http irops-brain https://irops-brain.onrender.com/mcp/
+claude mcp add --transport http irops-brain https://irops-brain.vercel.app/mcp/
 ```
+
+Besides the tools it serves the decision log (every proposal and what a human did with it), the cited rules and past
+lessons as resources, and a `disruption_briefing` prompt that walks your agent through the steps ours take.
 
 ## What we learned about FalkorDB
 
@@ -87,4 +102,6 @@ claude mcp add --transport http irops-brain https://irops-brain.onrender.com/mcp
   64 samples fits, and the app now rebuilds the graph if it ever comes back empty.
 - We pinned v4.22.1 because A\* has not been ported to 6.x yet.
 
-The code, the data pipeline and the backtest are on GitHub: https://github.com/PugarHuda/irops-brain
+Try it at https://irops-brain.vercel.app. The code, the data pipeline, the backtest and the demo video's source
+(an edge-tts voice-over, a Playwright recording of the live app and a Remotion composition) are on GitHub:
+https://github.com/PugarHuda/irops-brain
