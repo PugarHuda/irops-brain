@@ -374,6 +374,12 @@ def mcp_serves_the_catalogue():
             assert "MDW" in r.content[0].text, r
             bad = await c.call_tool("network_health", {"airline": "ZZ"})
             assert bad.is_error
+            # the briefing prompt only names tools the server really serves
+            import re as _re
+            p = await c.get_prompt("disruption_briefing", {"airline": "WN", "airport": "DEN"})
+            text = " ".join(m.content.text for m in p.messages)
+            named = set(_re.findall(r"\b[a-z]+(?:_[a-z]+)+\b", text))
+            assert {"rescue_capacity", "crews_over_limit"} <= named and named <= set(tools), named - set(tools)
     anyio.run(go)
 
 

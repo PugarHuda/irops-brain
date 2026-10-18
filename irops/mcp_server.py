@@ -163,6 +163,8 @@ def disruption_briefing(airline: str = "WN", airport: str = "DEN") -> str:
             f"3. critical_flights for the day, then propagate_delay on the most load-bearing late departure from "
             f"{airport}: flights pulled late, passengers misconnecting, crews over 14 CFR 117.13.\n"
             f"4. crews_over_limit at {airport}, then find_reserve there for each crew over its limit.\n"
+            f"5. disrupted_bookings, then rescue_capacity from {airport} for the destinations with the most stranded "
+            "passengers: say whether rebooking can carry them or the rest are refunds, and name the bottleneck.\n"
             "Quote ids exactly as the tools return them, explain each knock-on with its path (same aircraft, same "
             "crew), and say 'not in the graph' rather than guessing.")
 
