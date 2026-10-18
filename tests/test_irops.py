@@ -186,6 +186,7 @@ def live_feeds_land_in_the_graph():
         feed = live.refresh(t, force=True)
         assert feed["refreshed"] and "opensky" in feed["errors"] and "adsb" not in feed, feed
         assert t.live_conditions()["feed"]["aircraft_airborne"] is None
+        assert "opensky" in t.live_conditions()["feed"]["feed_errors"]  # the stored layer says which feed failed
     finally:
         live.fetch_opensky = real
     # a slow TAF feed costs the forecasts, not the FAA status and METAR fetched alongside it

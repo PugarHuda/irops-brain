@@ -147,7 +147,8 @@ async function loadLive() {
         + r.weather_categories.map((c) => `${c.airports} ${c.cat || "without a flight category"}`).join(", ") + ". "
         + `TAF forecasts flag ${r.rows.filter((x) => x.live.some((l) => l.source === "TAF")).length} of them for the next 12 hours.`
         + (r.feed.aircraft_airborne != null ? ` OpenSky ADS-B sees ${fmt(r.feed.aircraft_airborne)} ${CARRIER(tenant)} aircraft airborne and `
-          + `${fmt(r.feed.aircraft_on_ground)} on the ground right now.` : "");
+          + `${fmt(r.feed.aircraft_on_ground)} on the ground right now.` : "")
+        + (r.feed.feed_errors ? ` Some feeds did not answer this round (${r.feed.feed_errors}).` : "");
     if (!r.rows.length) { list.replaceChildren(el("li", { class: "empty" }, "Nothing in this network is constrained right now.")); return; }
     list.replaceChildren(...r.rows.map((x) => el("li", {},
       el("b", {}, x.airport), ` ${x.name || ""} · ${fmt(x.routes)} routes, ${fmt(x.daily_flights)} flights a day touch it`

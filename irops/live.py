@@ -62,6 +62,8 @@ def ground_at(client, prefix, airports):
         calls += 1
         r = client.get(ADSBLOL_URL.format(lat=round(a["lat"], 4), lon=round(a["lon"], 4), nm=GROUND_NM), timeout=15)
         if r.status_code == 429:
+            if not at:  # refused before counting anything: that is an outage, say so
+                r.raise_for_status()
             break
         r.raise_for_status()
         n = sum(1 for x in r.json().get("ac") or []
@@ -233,8 +235,9 @@ def refresh(tools, force=False, lock=None):
             g("UNWIND $rows AS r MATCH (a:Airport {code: r.code}) SET a.adsb_ground = r.n",
               {"rows": [{"code": c, "n": n} for c, n in ground.items()]}, write=True)
             out["adsb_ground_at"] = ground
-        g("MATCH (f:LiveFeed {id: 'feed'}) SET f.adsb_airborne = $a, f.adsb_ground = $gr, f.adsb_time = $t",
-          {"a": sky and sky["airborne"], "gr": sky and sky["on_ground"], "t": sky and sky["time"]}, write=True)
+        g("""MATCH (f:LiveFeed {id: 'feed'}) SET f.adsb_airborne = $a, f.adsb_ground = $gr, f.adsb_time = $t,
+             f.errors = $e""", {"a": sky and sky["airborne"], "gr": sky and sky["on_ground"], "t": sky and sky["time"],
+                                "e": "; ".join(f"{k}: {v}" for k, v in errors.items()) or None}, write=True)
         if sky:
             out["adsb"] = {k: v for k, v in sky.items() if k != "at"}
         return out

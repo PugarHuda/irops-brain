@@ -608,7 +608,8 @@ class Tools:
         entry, constrained or not."""
         start = len(self.trace)
         feed = self._run("""MATCH (f:LiveFeed {id: 'feed'}) RETURN f.fetched AS fetched, f.faa_time AS faa_time,
-            f.adsb_airborne AS aircraft_airborne, f.adsb_ground AS aircraft_on_ground, f.adsb_time AS adsb_time""")
+            f.adsb_airborne AS aircraft_airborne, f.adsb_ground AS aircraft_on_ground, f.adsb_time AS adsb_time,
+            f.errors AS feed_errors""")
         if not feed:
             return self._result("not_in_graph", start=start, reason="live feed never refreshed")
         ap = (airport or "").upper() or None
