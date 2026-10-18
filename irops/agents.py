@@ -14,7 +14,8 @@ import json
 import uuid
 
 from irops.scenario import current_roots, load_scenario
-from irops.tools import Tools, hhmm
+from irops.ingest import fdp_limit
+from irops.tools import TURN_PAD, Tools, hhmm
 
 CANCEL_IF_DELAY = 240   # projected minutes; beyond this a round-trip cancel beats a cascading delay
 PUBLISH_IF_DELAY = 45
@@ -81,7 +82,21 @@ def ops_agent(s: Session):
     if prop.get("misconnects"):
         t.handoff(a, "pax", "misconnects", [m["outbound"] for m in prop["misconnects"][:20]],
                   json.dumps(prop["misconnects"][:20]), s.id)
+    s.delays = {**{r["flight"]: r["delay"] for r in roots}, **{r["id"]: r["delay"] for r in prop["rows"]}}
     return {"lessons": lessons, "summary": prop.get("summary", {})}
+
+
+def legal_prefix(t, legs, delays, start):
+    """How many of `legs` (in order) a crew starting duty at `start` can fly inside its 14 CFR 117.13 limit."""
+    if not legs:
+        return 0
+    hour = int(hhmm(start, t._tz(legs[0]["origin"]))[-5:-3])
+    n = 0
+    for i, leg in enumerate(legs):
+        if leg["arr"] + delays.get(leg["flight"], leg["delay"] or 0) + TURN_PAD - start > fdp_limit(hour, i + 1):
+            break
+        n = i + 1
+    return n
 
 
 def crew_agent(s: Session):
@@ -90,25 +105,41 @@ def crew_agent(s: Session):
     used = 0
     for h in work["rows"]:
         b = json.loads(h["payload"])
-        s.call(a, "crew_duty", f"check {b['crew']}'s duty day", crew_id=b["crew"])
-        opts = s.call(a, "find_reserve", f"{b['crew']} times out at {b['at']}; who can cover?",
-                      airport=b["at"], minutes_needed=300)
+        duty = s.call(a, "crew_duty", f"check {b['crew']}'s duty day", crew_id=b["crew"])
+        at = next((r for r in duty["rows"] if r["flight"] == b["flight"]), None)
+        # the rest of this duty period: the legs that share its report time, from the one it times out on
+        legs = [r for r in duty["rows"] if at and r["duty_start"] == at["duty_start"] and r["dep"] >= at["dep"]
+                and r["status"] != "cancelled"]
+        need = max(300, max((r["arr"] + s.delays.get(r["flight"], 0) for r in legs), default=0) + TURN_PAD - t.now())
+        opts = s.call(a, "find_reserve", f"{b['crew']} times out at {b['at']}; who can cover its remaining {len(legs)} leg(s)?",
+                      airport=b["at"], minutes_needed=need)
         won = None
         for i, o in enumerate(opts["rows"]):
+            n = legal_prefix(t, legs, s.delays, t.now())
+            if not n:
+                continue
             c = s.call(a, "claim_reserve", "lock the reserve before anyone else takes it",
                        agent=a, reserve_id=o["reserve"], flight_ref=b["flight"])
             if c["outcome"] == "answered":
-                won = (o, opts["paths"][i] if i < len(opts["paths"]) else None)
+                won = (o, opts["paths"][i] if i < len(opts["paths"]) else None, n)
                 break
         if won:
-            o, path = won
+            o, path, n = won
             used += 1
+            cover = [x["flight"] for x in legs[:n]]
             how = "on call at the airport" if not o["deadhead_minutes"] else \
                 f"deadheading from {o['base']} ({int(o['deadhead_minutes'])} min, A* route)"
+            rest = legs[n:]
             t.remember(a, "assign_reserve",
-                       f"Replace {b['crew']} on {b['flight']} ({b['over_by']} min over FDP) with reserve {o['reserve']}, {how}.",
+                       f"Replace {b['crew']} ({b['over_by']} min over FDP) with reserve {o['reserve']}, {how}, for "
+                       f"{n} leg(s) from {b['flight']}, " + ("the most it can fly legally." if rest else "the rest of the duty period.")
+                       + (f" Its last {len(rest)} leg(s) from {rest[0]['flight']} still need a crew." if rest else ""),
                        [b["flight"], b["crew"]], ["14CFR117.13", "14CFR117.21"], evidence=path, session=s.id,
-                       action={"op": "assign_reserve", "reserve": o["reserve"], "flight": b["flight"], "replaces": b["crew"]})
+                       action={"op": "assign_reserve", "reserve": o["reserve"], "flight": b["flight"],
+                               "replaces": b["crew"], "legs": cover})
+            if rest:
+                t.handoff(a, "ops", "no_legal_crew", [rest[0]["flight"]],
+                          json.dumps({**b, "flight": rest[0]["flight"], "partial": o["reserve"]}), s.id)
         else:
             t.handoff(a, "ops", "no_legal_crew", [b["flight"]], json.dumps(b), s.id)
         t.close_handoff(h["handoff"])
@@ -144,8 +175,9 @@ def ops_followup(s: Session):
     work = s.call(a, "inbox", "flights crew scheduling could not cover", agent=a, session=s.id)
     for h in work["rows"]:
         b = json.loads(h["payload"])
+        why = f"reserve {b['partial']} can only cover the legs before it legally" if b.get("partial") else "no reserve reachable"
         t.remember(a, "cancel_round_trip", f"No legal crew for {b['flight']} ({b['crew']} over FDP by {b['over_by']} min, "
-                   "no reserve reachable). Cancel round trip.", [b["flight"]], ["14CFR117.13"], session=s.id,
+                   f"{why}). Cancel round trip.", [b["flight"]], ["14CFR117.13"], session=s.id,
                    action={"op": "cancel_with_return", "flight": b["flight"]})
         t.close_handoff(h["handoff"])
 
@@ -187,7 +219,7 @@ def approve(decision_id, tenant="irops_WN"):
         elif op == "publish_delays":
             res = {"outcome": "answered", "rows": [t.set_delay(x["flight"], x["delay"])["rows"][0] for x in act["delays"]]}
         elif op == "assign_reserve":
-            res = t.assign_reserve(act["reserve"], act["flight"], act["replaces"])
+            res = t.assign_reserve(act["reserve"], act["flight"], act["replaces"], act.get("legs"))
         elif op == "apply_rebook":
             res = t.apply_rebook(act["booking"], act["flights"])
         elif op == "refund":

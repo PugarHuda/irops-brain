@@ -88,6 +88,10 @@ main > section:first-child { border-top: 0; }
 .impact dt { font-size: .92rem; min-height: 2.8em; }
 .impact dd { margin: 0; font-size: 3rem; font-weight: 900; line-height: 1; letter-spacing: -.04em; font-variant-numeric: tabular-nums; }
 .impact dd.bad { color: var(--pink); }
+.impact .delta { display: inline-block; margin-top: 8px; font-size: .82rem; font-weight: 800; padding: 2px 10px; border-radius: 999px;
+  border: 1.5px solid var(--line); }
+.impact .delta.down { background: #D9F2E3; color: #17824A; }
+.impact .delta.up { background: #FDE3EC; color: var(--pink); }
 
 .evidence { border-right: 1.5px solid var(--line); }
 .ev-head { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; flex-wrap: wrap; }

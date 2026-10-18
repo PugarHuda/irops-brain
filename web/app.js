@@ -15,6 +15,7 @@ const RULE_URL = {
 let tz = "America/Denver";
 let tenant = "irops_WN";   // one FalkorDB graph per airline; every call names the graph it acts on
 let scenarios = [];
+let roots = [], baseline = null;   // the run's late departures and its projection, to show what each approval changed
 const CARRIER = (t) => t.split("_").pop();
 
 function el(tag, attrs = {}, ...kids) {
@@ -161,6 +162,7 @@ async function resetOps() {
   try {
     await api(`/api/reset?tenant=${encodeURIComponent(tenant)}`, {});
     document.querySelectorAll("#strips .strip:not(.done)").forEach((li) => markDone(li, "superseded"));
+    if (baseline) renderImpact(baseline);
     $("board-hint").textContent = `Every approved change in ${CARRIER(tenant)}'s graph was undone and rejected actions may be proposed again. Run the agents for fresh proposals.`;
   } catch (e) {
     $("board-hint").textContent = `Undo failed: ${e.message}`;
@@ -182,6 +184,8 @@ async function run() {
     const b = $("briefing");
     b.hidden = false;
     b.textContent = r.briefing.text;
+    roots = r.steps.find((s) => s.tool === "propagate_delay")?.args.roots || [];
+    baseline = r.summary;
     renderImpact(r.summary);
     renderStrips(r.proposals.map((p) => ({ ...p, tenant: r.tenant })));
     renderTrace(r.steps);
@@ -201,7 +205,7 @@ async function run() {
   }
 }
 
-function renderImpact(s) {
+function renderImpact(s, base) {
   const items = [
     ["More flights pulled late", s.downstream_flights, false],
     ["Passengers on them", s.pax_delayed, false],
@@ -210,8 +214,22 @@ function renderImpact(s) {
     ["Passengers owed a refund if they ask (3h+ late or cancelled)", s.pax_refund_eligible, true],
   ];
   const dl = $("impact");
-  dl.replaceChildren(...items.map(([t, v, bad]) => el("div", {}, el("dt", {}, t), el("dd", { class: bad ? "bad" : "" }, fmt(v)))));
+  const keys = ["downstream_flights", "pax_delayed", "pax_misconnecting", "crews_illegal", "pax_refund_eligible"];
+  dl.replaceChildren(...items.map(([t, v, bad], i) => {
+    const d = base ? (v || 0) - (base[keys[i]] || 0) : 0;
+    return el("div", {}, el("dt", {}, t), el("dd", { class: bad ? "bad" : "" }, fmt(v)),
+      d ? el("span", { class: `delta ${d < 0 ? "down" : "up"}` }, `${d > 0 ? "+" : "−"}${fmt(Math.abs(d))} after your approvals`) : null);
+  }));
   dl.hidden = false;
+}
+
+// re-project from the run's late departures on the graph as it now stands
+async function refreshImpact() {
+  if (!roots.length) return;
+  try {
+    const r = await api("/api/impact", { roots, tenant });
+    renderImpact(r.summary, baseline);
+  } catch { /* the approval itself is already verified; the figures refresh on the next one */ }
 }
 
 function renderStrips(list) {
@@ -259,6 +277,7 @@ async function decide(p, li, verb) {
   if (verb === "reject") return markDone(li, "rejected");
   const v = r.verification;
   markDone(li, "approved", `Written to the graph, then read back: ${v.rows.length} row(s) show the intended state.`);
+  refreshImpact();
   if (v.cypher?.length) li.querySelector(".strip-main").append(el("details", {}, el("summary", {}, "Read-back query"), v.cypher.map((q) => el("pre", {}, q))));
 }
 

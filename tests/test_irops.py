@@ -160,6 +160,10 @@ def approvals_are_atomic_verified_and_reversible():
     a = json.loads(by_kind["assign_reserve"]["action"])
     duty = t.crew_duty(a["replaces"])["rows"]
     assert a["flight"] not in [d["flight"] for d in duty], "relieved crew still shows the leg"
+    # ...and the reserve only takes the legs it can fly legally: neither crew breaches on them any more
+    roots = next(s for s in out["steps"] if s["tool"] == "propagate_delay")["args"]["roots"]
+    breaches = {(b["crew"], b["flight"]) for b in t.propagate_delay(roots)["crew_fdp_breaches"]}
+    assert not {(c, f) for c in (a["replaces"], a["reserve"]) for f in a["legs"]} & breaches, breaches
     # a new run supersedes the old proposals: they cannot be approved against the new state
     out2 = agents.run("den-elliott")
     stale = next(p for p in out["proposals"] if p["action"] and p["id"] not in {by_kind[k]["id"] for k in by_kind})

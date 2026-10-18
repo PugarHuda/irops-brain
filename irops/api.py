@@ -73,6 +73,16 @@ class Run(BaseModel):
     scenario: str = "den-elliott"
 
 
+class Root(BaseModel):
+    flight: str = Field(max_length=40)
+    delay: int = Field(ge=0, le=1440)
+
+
+class Impact(BaseModel):
+    roots: list[Root] = Field(max_length=300)
+    tenant: str = "irops_WN"
+
+
 class Ask(BaseModel):
     question: str = Field(max_length=500)
     tenant: str = "irops_WN"
@@ -141,14 +151,29 @@ def ask(body: Ask, request: Request):
     return llm.ask(body.question, tenant_of(body.tenant), client)
 
 
+@app.post("/api/impact")
+def impact(body: Impact):
+    """The run's projection recomputed on the graph as it stands now, so each approval shows what it changed.
+    Takes the run's own late departures as roots: a published delay is a notice, not a new cause."""
+    t = Tools(tenant_of(body.tenant))
+    ids = [r.flight for r in body.roots]
+    live = {r["id"] for r in t._run("MATCH (f:Flight:Active) WHERE f.id IN $ids RETURN f.id AS id", {"ids": ids})}
+    roots = [r.model_dump() for r in body.roots if r.flight in live]  # a cancelled departure carries no delay on
+    if not roots:
+        return {"summary": {"roots": 0, "downstream_flights": 0, "pax_delayed": 0, "pax_misconnecting": 0,
+                            "crews_illegal": 0, "pax_refund_eligible": 0}}
+    return {"summary": t.propagate_delay(roots, 8)["summary"]}
+
+
 @app.get("/api/compare")
 def compare(flight: str = "2022-12-22-WN2100-DEN", delay: int = 180, tenant: str = "irops_WN"):
     """The same question asked of a flat record lookup and of the graph."""
+    delay = max(0, min(delay, 1440))
     t = Tools(tenant_of(tenant))
     rec = t.resolve_flight(flight)
     if rec["outcome"] != "answered" or len(rec["rows"]) != 1:
         raise HTTPException(404, "flight not found")
-    graph = t.propagate_delay([{"flight": rec["rows"][0]["id"], "delay": max(0, min(delay, 1440))}], 8)
+    graph = t.propagate_delay([{"flight": rec["rows"][0]["id"], "delay": delay}], 8)
     return {"flight": rec["rows"][0], "delay": delay,
             "flat": {"flights_affected": 1, "pax_misconnecting": "unknown", "crews_illegal": "unknown",
                      "why": "A record lookup sees one row: this flight is late."},

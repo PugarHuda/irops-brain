@@ -26,13 +26,17 @@ cites the regulation it relies on, and waits for a human to approve it.
    cascading delay.
 3. **Crew agent** takes every crew the ripple pushes past its legal duty limit (14 CFR 117.13), finds a reserve on call
    at that airport, or the nearest base with one using **A\*** over the route network, and **atomically claims** it.
+   A crew that times out cannot fly the rest of its duty period either, so the reserve takes over those legs too, but
+   only as many as its own FDP limit allows; the first leg nobody can fly legally goes back to Ops as a cancel proposal.
 4. **Passenger agent** finds broken itineraries and computes **k-shortest feasible re-routings** (seats, cancellations
    and projected delays checked inside the query). A booking with no feasible re-routing gets an executable
    **refund** proposal (14 CFR 260.6); approving it releases the seats. The impact panel counts the passengers owed a
    refund if they ask: last leg projected 3h+ late, or a leg cancelled.
 5. **You approve or reject** each proposal. Approval is atomic (a double click or a second operator cannot run it
    twice), writes to the graph, then reads the graph back and is only stamped APPROVED if the read-back shows the
-   intended state. "Undo all approvals" reverts every change (reserve swaps, cancellations, rebookings, refunds) exactly.
+   intended state. The impact panel is then re-projected on the changed graph and shows what your approvals moved
+   (one fewer crew over its limit, fewer knock-on delays, more refunds owed after a cancel). "Undo all approvals"
+   reverts every change (reserve swaps, cancellations, rebookings, refunds) exactly.
 6. **Next session remembers.** Decisions and lessons are nodes. Run the scenario again and the agents recall what
    happened last time at that airport (a lesson learned again is counted, not duplicated). A **rejection is
    remembered**: the next run stores the identical action as WITHHELD, citing the rejected decision, until the
@@ -45,6 +49,9 @@ cites the regulation it relies on, and waits for a human to approve it.
    flights touch each constrained airport, and which spoke airports depend on it.
 9. **Bring your own agent (MCP).** The read-only tool catalogue is also served as an MCP server at `/mcp/`
    (streamable HTTP) and over stdio: `claude mcp add --transport http irops-brain https://irops-brain.vercel.app/mcp/`.
+   Besides the tools it serves a `decision_log` tool (every proposal and what a human did with it), the resources
+   `irops://{airline}/rules` and `irops://{airline}/lessons`, and a `disruption_briefing` prompt that walks an outside
+   agent through the same steps the in-app agents take.
 
 ## Does it predict what really happened?
 
@@ -71,13 +78,14 @@ after it:
 
 | Scenario | Cancels proposed | Airline also cancelled | Cancelled or 3h+ late | Projected 3h+ late | Really 3h+ late or cancelled | Base rate downstream |
 |---|---|---|---|---|---|---|
-| Denver (WN) | 5 | 2 | 3 | 24 | 13 (54%) | 52% of 105 |
+| Denver (WN) | 11 | 5 | 7 | 24 | 13 (54%) | 52% of 105 |
 | Midway (WN) | 0 | 0 | 0 | 0 | 0 | 83% of 6 |
 | Seattle (AS) | 2 | 0 | 0 | 0 | 0 | 52% of 97 |
 
 The honest reading: the knock-on model is accurate about delay that is already in the system (the table above), but at
 08:00 in Denver it cannot see the storm's *new* delays still to come. Its 3h+ calls are right 54% of the time against
-a 52% base rate downstream: no better than "everything downstream of a delayed hub goes bad". Seattle's two cancel
+a 52% base rate downstream: no better than "everything downstream of a delayed hub goes bad". Its cancels do better:
+7 of the 11 were cancelled by the airline too or flown 3h+ late. Seattle's two cancel
 proposals come from crews with no legal reserve on hand, and Alaska flew both less than 3h late: the agents were more
 conservative than the airline there.
 

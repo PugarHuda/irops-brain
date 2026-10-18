@@ -108,5 +108,42 @@ def recall(airline: str, about: str) -> dict:
     return _out(_t(airline).recall(about))
 
 
+@mcp.tool(annotations=RO)
+def decision_log(airline: str, status: str = "", limit: int = 30) -> dict:
+    """The agents' proposals and what humans did with them (proposed, approved, rejected, withheld, failed,
+    superseded), newest first, each with the rules it cites and what it is about. The audit trail of the operation."""
+    rows = _t(airline).decisions(status=status or None)[::-1][:max(1, min(limit, 100))]
+    return {"outcome": "answered" if rows else "not_in_graph",
+            "rows": [{k: v for k, v in r.items() if k != "evidence"} for r in rows]}
+
+
+@mcp.resource("irops://{airline}/rules", mime_type="application/json",
+              description="The regulations the agents cite (14 CFR Part 117 crew duty, 14 CFR 260.6 refunds), "
+                          "as stored in that airline's graph.")
+def rules(airline: str) -> list:
+    return _t(airline)._run("MATCH (r:Rule) RETURN r.id AS id, r.title AS title, r.text AS text, r.url AS url ORDER BY r.id")
+
+
+@mcp.resource("irops://{airline}/lessons", mime_type="application/json",
+              description="What earlier agent sessions learned, per airport, with how often each lesson recurred.")
+def lessons(airline: str) -> list:
+    return _t(airline)._run("""MATCH (l:Lesson) OPTIONAL MATCH (l)-[:ABOUT]->(a)
+        RETURN l.text AS lesson, toInteger(coalesce(l.seen, 1)) AS times_seen, collect(coalesce(a.code, a.id)) AS about, l.at AS at
+        ORDER BY at DESC LIMIT 50""")
+
+
+@mcp.prompt(title="Disruption briefing")
+def disruption_briefing(airline: str = "WN", airport: str = "DEN") -> str:
+    """Brief a duty manager on one airport the way the in-app agents work it."""
+    return (f"Brief me on irregular operations at {airport} for airline {airline}, using only the IROPS Brain tools.\n"
+            f"1. network_health and live_conditions for {airline}: what is constrained now.\n"
+            f"2. recall about {airport}: what earlier sessions learned.\n"
+            f"3. critical_flights for the day, then propagate_delay on the most load-bearing late departure from "
+            f"{airport}: flights pulled late, passengers misconnecting, crews over 14 CFR 117.13.\n"
+            f"4. find_reserve at {airport} for any crew over its limit.\n"
+            "Quote ids exactly as the tools return them, explain each knock-on with its path (same aircraft, same "
+            "crew), and say 'not in the graph' rather than guessing.")
+
+
 if __name__ == "__main__":
     mcp.run()

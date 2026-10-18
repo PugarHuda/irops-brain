@@ -65,9 +65,9 @@
   {
    "scenario": "den-elliott",
    "airline": "WN",
-   "cancels_proposed": 5,
-   "airline_also_cancelled": 2,
-   "cancels_cancelled_or_3h_late": 3,
+   "cancels_proposed": 11,
+   "airline_also_cancelled": 5,
+   "cancels_cancelled_or_3h_late": 7,
    "projected_3h_late": 24,
    "really_3h_late_or_cancelled": 13,
    "precision": 0.542,

@@ -170,11 +170,11 @@ class Tools:
         # passengers owed a refund if they ask (14 CFR 260.6): last leg 3h+ late, or a leg cancelled
         owed = self._run("""
             UNWIND $imp AS i
-            MATCH (f:Flight {id: i.id})<-[s:SEGMENT]-(b:Booking {status: 'confirmed'}) WHERE i.delay >= $sig
+            MATCH (f:Flight {id: i.id})<-[s:SEGMENT]-(b:Booking) WHERE i.delay >= $sig AND b.status <> 'refunded'
             OPTIONAL MATCH (b)-[n:SEGMENT]->() WHERE n.seq > s.seq
             WITH b, count(n) AS later WHERE later = 0
             RETURN collect(DISTINCT b.id) AS late""", {"imp": imp, "sig": SIGNIFICANT_DELAY})[0]["late"]
-        owed += self._run("""MATCH (f:Flight) WHERE NOT f:Active MATCH (f)<-[:SEGMENT]-(b:Booking {status: 'confirmed'})
+        owed += self._run("""MATCH (f:Flight) WHERE NOT f:Active MATCH (f)<-[:SEGMENT]-(b:Booking) WHERE b.status <> 'refunded'
             RETURN collect(DISTINCT b.id) AS c""")[0]["c"]
         owed_pax = self._run("UNWIND $ids AS i MATCH (b:Booking {id: i}) RETURN coalesce(sum(b.pax), 0) AS n",
                              {"ids": sorted(set(owed))})[0]["n"]
@@ -182,7 +182,8 @@ class Tools:
         summary = {"roots": len(resolved), "downstream_flights": len(down),
                    "delay_minutes": sum(r["delay"] for r in down),
                    "pax_delayed": sum(r["pax"] for r in down),
-                   "pax_misconnecting": sum(m["pax"] for m in mis), "crews_illegal": len(fdp),
+                   "pax_misconnecting": int(sum(m["pax"] for m in mis)), "crews_illegal": len({b["crew"] for b in fdp}),
+                   "crew_legs_illegal": len(fdp),
                    "pax_refund_eligible": int(owed_pax)}
         return self._result("answered" if down or mis or fdp else "not_in_graph", down, paths, start,
                             misconnects=mis, crew_fdp_breaches=fdp, summary=summary, unknown=unknown)
@@ -466,7 +467,7 @@ class Tools:
             RETURN count(DISTINCT b) AS bookings, toInteger(sum(b.pax)) AS pax""", {"ids": ids})
         return self._result("answered", [{"cancelled": ids, **hit[0]}], start=start)
 
-    def assign_reserve(self, reserve_id, flight_id, replaces):
+    def assign_reserve(self, reserve_id, flight_id, replaces, legs=None):
         """Swap the timed-out crew for the claimed reserve. Requires the claim edge, so an
         agent cannot assign a reserve it does not hold."""
         start = len(self.trace)
@@ -474,6 +475,7 @@ class Tools:
         if not f:
             return self._result("unknown_entity", start=start)
         hour = int(hhmm(self.now(), self._tz(f[0]["o"]))[-5:-3])
+        # `legs`: the timed-out crew's legs the reserve takes over, from flight_id on (as many as it may fly legally).
         # The relieved crew's inbound CREW_NEXT stops carrying delay: it is retyped to CREW_NEXT_RELIEVED
         # (filtering every variable-length path instead costs ~90x) and kept, so reset_ops can restore it.
         rows = self._run("""
@@ -488,9 +490,15 @@ class Tools:
             DELETE cn
             WITH DISTINCT r, f
             CREATE (r)-[:ASSIGNED {duty_start: $now, fdp_limit: $limit, replaced: $old}]->(f)
-            RETURN r.id AS reserve, f.id AS flight""",
+            WITH r, f
+            OPTIONAL MATCH (:Crew {id: $old})-[b:ASSIGNED]->(g:Flight) WHERE g.id IN $later AND b.relieved_by IS NULL
+            FOREACH (_ IN CASE WHEN b IS NULL THEN [] ELSE [1] END |
+                SET b.relieved_by = $r
+                CREATE (r)-[:ASSIGNED {duty_start: $now, fdp_limit: $limit, replaced: $old}]->(g))
+            RETURN r.id AS reserve, f.id AS flight, count(g) AS later_legs""",
                          {"r": reserve_id, "f": flight_id, "old": replaces, "now": self.now(),
-                          "limit": fdp_limit(hour, 2)}, write=True)
+                          "later": [x for x in (legs or [flight_id]) if x != flight_id],
+                          "limit": fdp_limit(hour, len(legs or [flight_id]))}, write=True)
         return self._result("answered" if rows else "rejected", rows, start=start)
 
     def apply_rebook(self, booking_id, flights, agent="pax"):
