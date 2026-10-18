@@ -177,18 +177,24 @@ def route(q, t: Tools):
     mins = re.search(r"(\d{2,4})\s*(MIN|M\b)", u)
     hrs = re.search(r"(\d+(?:\.\d+)?)\s*(H|HOUR)", u)
     ap = [a for a in re.findall(r"\b([A-Z]{3})\b", u) if a not in {"WHO", "THE", "AND", "FOR", "CAN", "HOW", "WHY",
-                                                                   "MIN", "ARE", "OUT", "ANY", "OUR"}]
+                                                                   "MIN", "ARE", "OUT", "ANY", "OUR"} and t._airport(a)]
     bk = re.search(r"\bB\d{5}\b", u)
     if not ap:  # "Denver", "Midway": resolve names through the airport full-text index
         named = re.search(r"\b(?:at|in|from|about|to|for)\s+([A-Za-z][A-Za-z .'-]{2,40})", q, re.I)
-        hit = t.resolve_airport(named.group(1)) if named else None
-        if hit and hit["outcome"] == "answered":
-            ap = [hit["rows"][0]["code"]]
+        words = named.group(1).split()[:3] if named else []
+        for n in range(len(words), 0, -1):  # "Seattle right now": drop trailing words until a name matches
+            hit = t.resolve_airport(" ".join(words[:n]))
+            if hit["outcome"] == "answered":
+                ap = [hit["rows"][0]["code"]]
+                break
     if fl and (mins or hrs):
         d = int(mins.group(1)) if mins else int(float(hrs.group(1)) * 60)
         res, tool, args = t.propagate_delay([{"flight": fl.group(1), "delay": d}], 8), "propagate_delay", {"flight": fl.group(1), "delay": d}
     elif bk:
         res, tool, args = t.rebook_options(bk.group(0), 3), "rebook_options", {"booking_id": bk.group(0)}
+    elif re.search(r"\bOVER\b|\bPAST\b|ILLEGAL|BREACH|TIMED? ?OUT|DUTY LIMIT|FDP", u) and re.search(r"CREW|PILOT|DUTY|FDP", u):
+        a = ap[-1] if ap else None
+        res, tool, args = t.crews_over_limit(a), "crews_over_limit", {"airport": a}
     elif re.search(r"RESERVE|COVER|CREW AT", u) and ap:
         res, tool, args = t.find_reserve(ap[-1], minutes_needed=300), "find_reserve", {"airport": ap[-1]}
     elif re.search(r"CRITICAL|LOAD.BEARING|MOST IMPORTANT", u):
@@ -197,7 +203,8 @@ def route(q, t: Tools):
     elif re.search(r"RIGHT NOW|LIVE|TODAY|FAA|GROUND STOP|WEATHER|METAR", u):
         from irops import live
         live.refresh(t)
-        res, tool, args = t.live_conditions(), "live_conditions", {}
+        a = ap[-1] if ap else None
+        res, tool, args = t.live_conditions(a), "live_conditions", {"airport": a}
     elif re.search(r"\bC\d{4}\b|\bR-[A-Z]{3}-\d{3}\b", u):
         cid = re.search(r"\bC\d{4}\b|\bR-[A-Z]{3}-\d{3}\b", u).group(0)
         res, tool, args = t.crew_duty(cid), "crew_duty", {"crew_id": cid}
@@ -212,7 +219,7 @@ def route(q, t: Tools):
         res, tool, args = t.disrupted_bookings(20), "disrupted_bookings", {}
     else:
         return {"by": "router", "answer": f"Try: 'What breaks if {c}2262 2022-12-22 DEN is 2h late?', "
-                "'Who can cover a crew at Denver?', 'Rebook B09455', 'Which flights are load-bearing?', "
+                "'Who can cover a crew at Denver?', 'Which crews are over their duty limit at DEN?', 'Weather at SEA right now', 'Rebook B09455', 'Which flights are load-bearing?', "
                 "'Which airports are cut off?', 'What do we remember about DEN?'", "calls": []}
     return {"by": "router", "answer": _say(tool, res),
             "calls": [{"tool": tool, "args": args, "outcome": res["outcome"], "rows": res["rows"][:12],
@@ -241,8 +248,14 @@ def _say(tool, r):
         return f"{r['components']} network component(s); cut off: {', '.join(r['cut_off_airports']) or 'none'}."
     if tool == "recall":
         return "; ".join(x["summary"] for x in rows[:3]) or "; ".join(x["lesson"] for x in r.get("lessons", [])[:3])
+    if tool == "crews_over_limit":
+        return (f"{r['crews']} crew(s) pushed past their duty limit by the {r['roots']} delays now in the graph: "
+                + ", ".join(f"{x['crew']} on {x['flight']} ({x['over_by']} min over)" for x in rows[:6]) + ".")
     if tool == "live_conditions":
         f = r.get("feed", {})
+        if len(rows) == 1 and not rows[0]["live"]:
+            x = rows[0]
+            return f"{x['airport']} right now: {x['flight_category'] or 'no flight category'}, not constrained. {x['metar'] or ''}"
         bits = [f"{x['airport']} ({'; '.join(l['kind'] for l in x['live'])}; {int(x['daily_flights'] or 0)} flights/day touch it)"
                 for x in rows[:5]]
         return f"Right now (FAA {f.get('faa_time', '?')}): " + ", ".join(bits) + "."

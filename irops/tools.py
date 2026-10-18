@@ -203,6 +203,24 @@ class Tools:
                       {"id": crew_id})
         return self._result("answered", rows, [x["p"] for x in p], start)
 
+    def crews_over_limit(self, airport=None):
+        """Crews that the delays now in the graph push past 14 CFR 117.13, projected through rotations and crew
+        connections like propagate_delay; with `airport`, only breaches on legs departing there."""
+        start = len(self.trace)
+        roots = self._run("MATCH (f:Flight:Active {status: 'delayed'}) RETURN f.id AS flight, f.delay AS delay")
+        ap = (airport or "").upper()
+        if ap and not self._airport(ap):
+            return self._result("unknown_entity", start=start)
+        if not roots:
+            return self._result("not_in_graph", start=start, reason="no delays recorded in the graph yet")
+        res = self.propagate_delay(roots)
+        rows = [b for b in res.get("crew_fdp_breaches", []) if not ap or b["at"] == ap]
+        # the evidence: each crew's assignment to the leg it cannot legally finish
+        paths = [x["p"] for x in self._run("""UNWIND $b AS b MATCH p = (:Crew {id: b.crew})-[a:ASSIGNED]->(:Flight {id: b.flight})
+            WHERE a.relieved_by IS NULL RETURN p""", {"b": [{"crew": b["crew"], "flight": b["flight"]} for b in rows[:30]]})]
+        return self._result("answered" if rows else "not_in_graph", rows, paths, start,
+                            crews=len({b["crew"] for b in rows}), roots=len(roots))
+
     def find_reserve(self, airport, need_at=None, minutes_needed=360):
         """Free reserve crews on call at `airport`; if none, the nearest base with a free
         reserve, routed by A* over the route network (haversine heuristic)."""
@@ -537,17 +555,23 @@ class Tools:
             RETURN b.id AS booking, b.pax AS pax, size(fs) AS seats_released_on""", {"id": booking_id}, write=True)
         return self._result("answered" if rows else "rejected", rows, start=start)
 
-    def live_conditions(self):
+    def live_conditions(self, airport=None):
         """Airports in this airline's network that the FAA or the weather constrain right now, with how much of
         the network runs through each (routes and scheduled departures per day) and which spoke airports
-        depend on it for most of their service."""
+        depend on it for most of their service. With `airport`: that airport's current METAR and any FAA
+        entry, constrained or not."""
         start = len(self.trace)
         feed = self._run("MATCH (f:LiveFeed {id: 'feed'}) RETURN f.fetched AS fetched, f.faa_time AS faa_time")
         if not feed:
             return self._result("not_in_graph", start=start, reason="live feed never refreshed")
+        ap = (airport or "").upper() or None
+        if ap and not self._airport(ap):
+            return self._result("unknown_entity", start=start)
         rows = self._run("""
-            MATCH (l:Live)-[:AT]->(a:Airport)
-            WITH a, collect({source: l.source, kind: l.kind, reason: l.reason, detail: l.detail, as_of: l.as_of}) AS live
+            MATCH (a:Airport) WHERE ($ap IS NULL AND (a)<-[:AT]-(:Live)) OR a.code = $ap
+            OPTIONAL MATCH (l:Live)-[:AT]->(a)
+            WITH a, [x IN collect({source: l.source, kind: l.kind, reason: l.reason, detail: l.detail, as_of: l.as_of})
+                     WHERE x.source IS NOT NULL] AS live
             OPTIONAL MATCH (a)-[r:ROUTE]-(b:Airport)
             WITH a, live, count(DISTINCT b) AS routes, sum(r.daily) AS daily_flights
             OPTIONAL MATCH (s:Airport)-[sr:ROUTE]-(a)
@@ -557,8 +581,8 @@ class Tools:
             WITH a, live, routes, daily_flights,
                  collect(DISTINCT CASE WHEN s IS NOT NULL AND via * 2 >= total THEN s.code END) AS dependent
             RETURN a.code AS airport, a.name AS name, a.wx_cat AS flight_category, a.wx_raw AS metar,
-                   routes, daily_flights, dependent AS spokes_mostly_served_from_here, live
-            ORDER BY daily_flights DESC""")
+                   a.wx_at AS observed, routes, daily_flights, dependent AS spokes_mostly_served_from_here, live
+            ORDER BY daily_flights DESC""", {"ap": ap})
         wx = self._run("""MATCH (a:Airport) WHERE a.wx_cat IS NOT NULL
             RETURN a.wx_cat AS cat, count(*) AS airports ORDER BY airports DESC""")
         return self._result("answered" if rows else "not_in_graph", rows, start=start, feed=feed[0],
@@ -637,6 +661,9 @@ CATALOGUE = {
                             "required": ["flight", "delay"], "additionalProperties": False}},
                          "max_hops": {"type": "integer"}}, ["roots", "max_hops"]),
     "crew_duty": ("A crew's legs, projected flight-duty-period use and limit.", {"crew_id": {"type": "string"}}, ["crew_id"]),
+    "crews_over_limit": ("Crews the current delays push past their legal flight-duty limit (14 CFR 117.13), "
+                         "optionally only at one airport (3-letter code).",
+                         {"airport": {"type": "string"}}, []),
     "find_reserve": ("Free reserve crews at an airport, or the nearest base with one (A* deadhead route).",
                      {"airport": {"type": "string"}, "minutes_needed": {"type": "integer"}}, ["airport", "minutes_needed"]),
     "critical_flights": ("Most load-bearing remaining flights of a day (betweenness centrality).",
@@ -647,7 +674,9 @@ CATALOGUE = {
     "rebook_options": ("k fastest feasible re-routings for a booking (k-shortest paths).",
                        {"booking_id": {"type": "string"}, "k": {"type": "integer"}}, ["booking_id", "k"]),
     "live_conditions": ("Airports in the network constrained RIGHT NOW (FAA ground stops/delay programs/closures, "
-                        "IFR weather from METAR), with routes and daily flights through each.", {}, []),
+                        "IFR weather from METAR), with routes and daily flights through each. Pass an airport code for that "
+                        "airport's current METAR even when it is not constrained.",
+                        {"airport": {"type": "string"}}, []),
     "recall": ("Earlier decisions and lessons about a flight, crew, airport or booking.",
                {"about": {"type": "string"}}, ["about"]),
 }

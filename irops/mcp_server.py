@@ -62,6 +62,12 @@ def crew_duty(airline: str, crew_id: str) -> dict:
 
 
 @mcp.tool(annotations=RO)
+def crews_over_limit(airline: str, airport: str = "") -> dict:
+    """Crews the delays now in the graph push past 14 CFR 117.13, optionally only on legs departing one airport."""
+    return _out(_t(airline).crews_over_limit(airport or None))
+
+
+@mcp.tool(annotations=RO)
 def find_reserve(airport: str, airline: str, minutes_needed: int = 300) -> dict:
     """Free reserve crews at an airport, else the nearest base with one, routed by A* over the route network."""
     return _out(_t(airline).find_reserve(airport, minutes_needed=minutes_needed))
@@ -92,14 +98,15 @@ def disrupted_bookings(airline: str, limit: int = 20) -> dict:
 
 
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, idempotentHint=True, openWorldHint=True))
-def live_conditions(airline: str) -> dict:
+def live_conditions(airline: str, airport: str = "") -> dict:
     """Airports in the airline's network constrained RIGHT NOW: FAA ground stops, ground delay programs, delays and
     closures, plus IFR/LIFR weather from METAR, with routes and daily flights through each. Refreshes the graph's
-    live layer from the FAA and aviationweather.gov at most every 5 minutes."""
+    live layer from the FAA and aviationweather.gov at most every 5 minutes. With `airport`, that airport's current
+    METAR and FAA entries even when it is not constrained."""
     from irops import live
     t = _t(airline)
     feed = live.refresh(t)
-    return {"feed": feed, **_out(t.live_conditions())}
+    return {"feed": feed, **_out(t.live_conditions(airport or None))}
 
 
 @mcp.tool(annotations=RO)
@@ -140,7 +147,7 @@ def disruption_briefing(airline: str = "WN", airport: str = "DEN") -> str:
             f"2. recall about {airport}: what earlier sessions learned.\n"
             f"3. critical_flights for the day, then propagate_delay on the most load-bearing late departure from "
             f"{airport}: flights pulled late, passengers misconnecting, crews over 14 CFR 117.13.\n"
-            f"4. find_reserve at {airport} for any crew over its limit.\n"
+            f"4. crews_over_limit at {airport}, then find_reserve there for each crew over its limit.\n"
             "Quote ids exactly as the tools return them, explain each knock-on with its path (same aircraft, same "
             "crew), and say 'not in the graph' rather than guessing.")
 

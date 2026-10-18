@@ -159,6 +159,9 @@ pre { font: 12px/1.45 var(--code); background: white; border: 1px solid var(--ha
 #ask-form { display: flex; gap: 10px; margin-top: 14px; max-width: 900px; }
 #q { flex: 1; min-width: 0; padding: 13px 18px; border: 1.5px solid var(--line); border-radius: 999px; background: white; }
 #ask-form button { background: var(--ink); color: white; font-weight: 600; padding: 0 26px; }
+.examples { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; max-width: 900px; }
+.examples button { background: white; border: 1.5px solid var(--line); border-radius: 999px; padding: 6px 14px; font-size: .88rem; }
+.examples button:hover { border-color: var(--ink); }
 .answer { margin-top: 14px; max-width: 900px; }
 .answer .text { font-size: 1.05rem; background: white; border: 1.5px solid var(--line); border-radius: 14px; padding: 14px 16px; white-space: pre-wrap; }
 .answer .by { color: var(--ink-soft); font-size: .85rem; }

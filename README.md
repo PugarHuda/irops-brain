@@ -49,7 +49,8 @@ cites the regulation it relies on, and waits for a human to approve it.
    flights touch each constrained airport, and which spoke airports depend on it.
 9. **Bring your own agent (MCP).** The read-only tool catalogue is also served as an MCP server at `/mcp/`
    (streamable HTTP) and over stdio: `claude mcp add --transport http irops-brain https://irops-brain.vercel.app/mcp/`.
-   Besides the tools it serves a `decision_log` tool (every proposal and what a human did with it), the resources
+   Besides the tools (including `crews_over_limit`, which projects the delays now in the graph onto every crew's
+   duty limit, per airport, and `live_conditions` for any one airport's current METAR) it serves a `decision_log` tool (every proposal and what a human did with it), the resources
    `irops://{airline}/rules` and `irops://{airline}/lessons`, and a `disruption_briefing` prompt that walks an outside
    agent through the same steps the in-app agents take.
 

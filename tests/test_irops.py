@@ -67,6 +67,7 @@ def main():
     refunds_and_rejections_are_remembered()
     other_airline_is_isolated()
     names_and_constraints()
+    crews_over_limit_agree_with_propagation()
     mcp_serves_the_catalogue()
     live_feeds_land_in_the_graph()
     llm_answers_are_validated()
@@ -129,6 +130,11 @@ def live_feeds_land_in_the_graph():
     assert route("What is constrained right now?", t)["calls"][0]["tool"] == "live_conditions"
     assert route("Is crew C0464 legal?", t)["calls"][0]["tool"] == "crew_duty"
     assert route("Which flights are the most load-bearing right now?", t)["calls"][0]["tool"] == "critical_flights"
+    # one airport on request, constrained or not, by code or by name
+    sea = t.live_conditions("SEA")["rows"]
+    assert len(sea) == 1 and sea[0]["airport"] == "SEA" and sea[0]["metar"].startswith(("METAR", "SPECI")), sea
+    assert t.live_conditions("ZZZ")["outcome"] == "unknown_entity"
+    assert route("What is the weather in Seattle right now?", t)["calls"][0]["args"]["airport"] == "SEA"
 
 
 def snapshot(t):
@@ -230,6 +236,26 @@ def names_and_constraints():
         assert "AssertionError" not in type(e).__name__
 
 
+def crews_over_limit_agree_with_propagation():
+    """The crews tool projects the delays in the graph exactly like the ops agent; per airport it is a subset."""
+    from irops.scenario import current_roots, load_scenario
+    t = Tools()
+    load_scenario("den-elliott", t)
+    try:
+        all_ = t.crews_over_limit()
+        full = t.propagate_delay(current_roots(t))["summary"]
+        assert all_["crews"] == full["crews_illegal"] > 0, (all_["crews"], full)
+        den = t.crews_over_limit("DEN")
+        assert den["rows"] and all(b["at"] == "DEN" for b in den["rows"]) and den["crews"] <= all_["crews"]
+        assert len(den["paths"]) == len(den["rows"])  # each breach carries its crew's assignment as evidence
+        assert t.crews_over_limit("ZZZ")["outcome"] == "unknown_entity"
+        r = route("Which crews are over their duty limit at DEN?", t)["calls"][0]
+        assert r["tool"] == "crews_over_limit" and r["args"]["airport"] == "DEN"
+        assert route("Who can cover a crew at Denver?", t)["calls"][0]["tool"] == "find_reserve"  # 'cover' is not 'over'
+    finally:
+        t.reset_ops()
+
+
 def mcp_serves_the_catalogue():
     import anyio
     from mcp.client.client import Client
@@ -238,7 +264,7 @@ def mcp_serves_the_catalogue():
     async def go():
         async with Client(mcp) as c:
             tools = {x.name: x for x in (await c.list_tools()).tools}
-            assert {"propagate_delay", "find_reserve", "rebook_options", "recall"} <= set(tools)
+            assert {"propagate_delay", "find_reserve", "rebook_options", "recall", "crews_over_limit"} <= set(tools)
             # every tool is read-only except the live refresh, which writes the live layer and says so
             assert all(x.annotations.read_only_hint for n, x in tools.items() if n != "live_conditions")
             assert tools["live_conditions"].annotations.open_world_hint
