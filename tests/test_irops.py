@@ -135,6 +135,21 @@ def live_feeds_land_in_the_graph():
     assert len(sea) == 1 and sea[0]["airport"] == "SEA" and sea[0]["metar"].startswith(("METAR", "SPECI")), sea
     assert t.live_conditions("ZZZ")["outcome"] == "unknown_entity"
     assert route("What is the weather in Seattle right now?", t)["calls"][0]["args"]["airport"] == "SEA"
+    # the endpoint keeps serving the stored layer, and says why, while a run writes or the FAA is down
+    from fastapi.testclient import TestClient
+    from irops import api
+    c = TestClient(api.app)
+    t._run("MATCH (f:LiveFeed) SET f.fetched = 0", write=True)  # stale, so the endpoint wants to refresh
+    with api.WRITE:
+        r = c.get("/api/live").json()
+    assert r["feed"]["busy"] and r["feed"]["faa_time"] and "weather_categories" in r, r["feed"]
+    real, live.fetch_faa = live.fetch_faa, lambda client: (_ for _ in ()).throw(OSError("FAA down"))
+    try:
+        r = c.get("/api/live").json()
+        assert "FAA down" in r["feed"]["error"] and r["feed"]["faa_time"], r["feed"]
+    finally:
+        live.fetch_faa = real
+    assert c.get("/api/live").json()["feed"]["refreshed"]
 
 
 def snapshot(t):

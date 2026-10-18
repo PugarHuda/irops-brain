@@ -131,7 +131,11 @@ async function loadLive() {
   try {
     const r = await api(`/api/live?tenant=${encodeURIComponent(tenant)}`);
     const when = r.feed?.faa_time || "";
-    $("live-caption").textContent = r.feed?.error
+    if (r.feed?.busy) setTimeout(loadLive, 15000);  // an agent run is writing; fetch fresh feeds once it is done
+    $("live-caption").textContent = !r.weather_categories
+      ? "The live layer has not been fetched into this graph yet." + (r.feed?.busy ? " Retrying once the agent run finishes." : "")
+      : r.feed?.busy ? `An agent run is writing to the graph, so this is the stored layer (FAA status as of ${when}). Refreshing shortly.`
+      : r.feed?.error
       ? `The live feeds could not be reached (${r.feed.error}). Showing the last layer stored in the graph.`
       : `FAA status as of ${when}. METAR for ${r.weather_categories.reduce((n, c) => n + c.airports, 0)} airports in ${CARRIER(tenant)}'s network: `
         + r.weather_categories.map((c) => `${c.airports} ${c.cat}`).join(", ") + ".";

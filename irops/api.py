@@ -134,11 +134,12 @@ def live_now(tenant: str = "irops_WN"):
     t = Tools(tenant_of(tenant))
     try:
         feed = live.refresh(t, lock=writing(10))
-    except HTTPException:
-        raise
+    except HTTPException:  # an agent run holds the write lock: the stored layer is still readable, so show it
+        feed = {"refreshed": False, "busy": True}
     except Exception as e:  # FAA or aviationweather unreachable: show the last layer in the graph, and say so
         feed = {"refreshed": False, "error": f"{type(e).__name__}: {e}"[:200]}
-    return {"feed": feed, **t.live_conditions()}
+    res = t.live_conditions()
+    return {**res, "feed": {**res.get("feed", {}), **feed}}  # the stored layer's time plus this call's status
 
 
 @app.post("/api/ask")

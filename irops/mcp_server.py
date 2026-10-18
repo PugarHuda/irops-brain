@@ -106,7 +106,8 @@ def live_conditions(airline: str, airport: str = "") -> dict:
     from irops import live
     t = _t(airline)
     feed = live.refresh(t)
-    return {"feed": feed, **_out(t.live_conditions(airport or None))}
+    res = _out(t.live_conditions(airport or None))
+    return {**res, "feed": {**res.get("feed", {}), **feed}}
 
 
 @mcp.tool(annotations=RO)
