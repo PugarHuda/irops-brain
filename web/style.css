@@ -145,6 +145,7 @@ main > section:first-child { border-top: 0; }
 .lane ol { margin: 0; padding-left: 1.6rem; max-height: 460px; overflow: auto; }
 .lane li { margin: 0 0 8px; font-size: .92rem; }
 .lane li b { font-weight: 800; }
+.lane li .result { font-weight: 700; }
 .outcome { font-size: .78rem; padding: 0 8px; border: 1px solid var(--ink-soft); border-radius: 999px; margin-left: 4px; }
 .outcome.from_memory { border-color: var(--blue); color: var(--blue); }
 .outcome.rejected, .outcome.unknown_entity { border-color: var(--pink); color: var(--pink); }

@@ -357,7 +357,11 @@ class Tools:
         limit = "seats out of " + o if out_s <= in_s else "seats into " + d
         if total < min(out_s, in_s):
             limit = "the connecting routes in between"
-        return self._result("answered" if total else "not_in_graph", rows, start=start, origin=o, dest=d,
+        # each last leg that carries flow, as a one-edge path the evidence canvas can draw
+        paths = [{"nodes": [{"key": r["from"], "label": "Airport", "code": r["from"]},
+                            {"key": d, "label": "Airport", "code": d}],
+                  "edges": [{"type": "ROUTE", "src": r["from"], "dst": d, "flow": int(r["flow"])}]} for r in rows]
+        return self._result("answered" if total else "not_in_graph", rows, paths, start=start, origin=o, dest=d,
                             hours=int(hours), max_passengers=total, seats_leaving_origin=out_s, seats_arriving_dest=in_s, bottleneck=limit)
 
     def _tz(self, code):

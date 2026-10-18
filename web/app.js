@@ -68,7 +68,7 @@ const cy = cytoscape({
 function edgeLabel(e) {
   if (e.type === "NEXT_LEG") return `aircraft ${e.tail || ""} · slack ${e.slack}m`;
   if (e.type === "CREW_NEXT") return `crew ${e.crew} · slack ${e.slack}m`;
-  if (e.type === "ROUTE") return `${e.block} min`;
+  if (e.type === "ROUTE") return e.flow !== undefined ? `${e.flow} pax can still fly in` : `${e.block} min`;
   if (e.type === "CONN") return "connect";
   if (e.type === "ARRIVES_AT") return "arrives";
   if (e.type === "ASSIGNED") return "flies";
@@ -304,6 +304,8 @@ function renderTrace(steps) {
         el("b", {}, s.tool), el("span", { class: `outcome ${s.outcome}` }, s.outcome.replace(/_/g, " ")),
         s.paths.length ? el("button", { class: "show", onclick: () => showPaths(s.paths, s.note) }, "paths") : null,
         el("div", {}, s.note),
+        s.extra && s.extra.max_passengers !== undefined
+          ? el("div", { class: "result" }, `At most ${s.extra.max_passengers} passengers (max flow), limited by ${s.extra.bottleneck}.`) : null,
         el("details", {}, el("summary", {}, `${s.cypher.length} Cypher quer${s.cypher.length === 1 ? "y" : "ies"}`),
           s.cypher.map((q) => el("pre", {}, q)))))));
   }));

@@ -65,6 +65,7 @@ def main():
     t.reset_ops()
     approvals_are_atomic_verified_and_reversible()
     refunds_and_rejections_are_remembered()
+    refunds_say_why_rebooking_fails()
     other_airline_is_isolated()
     names_and_constraints()
     crews_over_limit_agree_with_propagation()
@@ -260,6 +261,23 @@ def refunds_and_rejections_are_remembered():
     assert snapshot(t) == before
 
 
+def refunds_say_why_rebooking_fails():
+    """When no re-routing is found, the refund the passenger agent proposes says, from a real max flow, whether the
+    route is out of seats or only no connection works in time. Only the k-shortest-path search is stubbed out."""
+    from irops import agents
+    real = Tools.rebook_options
+    Tools.rebook_options = lambda self, booking_id, k=3: self._result("not_in_graph")
+    try:
+        out = agents.run("den-elliott")
+    finally:
+        Tools.rebook_options = real
+        Tools().reset_ops()
+    refunds = [p for p in out["proposals"] if p["kind"] == "refund"]
+    assert refunds and all("max flow" in p["summary"] and "14 CFR 260.6" in p["summary"] for p in refunds), refunds
+    flows = [s for s in out["steps"] if s["agent"] == "pax" and s["tool"] == "rescue_capacity"]
+    assert len(flows) >= len(out["capacity"]), flows  # one per busiest route, plus the refunds' own routes
+
+
 def other_airline_is_isolated():
     from irops import agents
     wn_before = Tools("irops_WN")._run("MATCH (f:Flight) RETURN count(f) AS n")[0]["n"]
@@ -315,6 +333,7 @@ def rescue_capacity_is_a_max_flow():
         r = t.rescue_capacity("DEN", "BOS")
         assert r["outcome"] == "answered" and 0 < r["max_passengers"] <= min(r["seats_leaving_origin"], r["seats_arriving_dest"]), r
         assert all(x["to"] == "BOS" for x in r["rows"])
+        assert len(r["paths"]) == len(r["rows"]) and all(p["edges"][0]["dst"] == "BOS" for p in r["paths"])
         assert sum(x["flow"] for x in r["rows"]) == r["max_passengers"]  # everything that reaches the sink
         assert r["bottleneck"] in ("seats out of DEN", "seats into BOS", "the connecting routes in between")
         direct = t.rescue_capacity("MDW", "LGA")
