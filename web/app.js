@@ -138,7 +138,7 @@ async function loadLive() {
       : r.feed?.error
       ? `The live feeds could not be reached (${r.feed.error}). Showing the last layer stored in the graph.`
       : `FAA status as of ${when}. METAR for ${r.weather_categories.reduce((n, c) => n + c.airports, 0)} airports in ${CARRIER(tenant)}'s network: `
-        + r.weather_categories.map((c) => `${c.airports} ${c.cat}`).join(", ") + ".";
+        + r.weather_categories.map((c) => `${c.airports} ${c.cat || "without a flight category"}`).join(", ") + ".";
     if (!r.rows.length) { list.replaceChildren(el("li", { class: "empty" }, "Nothing in this network is constrained right now.")); return; }
     list.replaceChildren(...r.rows.map((x) => el("li", {},
       el("b", {}, x.airport), ` ${x.name || ""} · ${fmt(x.routes)} routes, ${fmt(x.daily_flights)} flights a day touch it`,
