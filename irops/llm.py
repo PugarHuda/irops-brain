@@ -187,6 +187,12 @@ def route(q, t: Tools):
             if hit["outcome"] == "answered":
                 ap = [hit["rows"][0]["code"]]
                 break
+    cap = re.search(r"CAPACITY|SEATS|HOW MANY (?:PASSENGERS|PEOPLE|PAX)|CAN WE (?:MOVE|CARRY|GET)", u)
+    if cap and len(ap) < 2:  # "from Denver to Boston": resolve both names
+        ends = re.search(r"\bfrom\s+([A-Za-z .'-]+?)\s+to\s+([A-Za-z .'-]+?)(?:\?|$| in | by | today| tonight)", q, re.I)
+        hits = [t.resolve_airport(x) for x in ends.groups()] if ends else []
+        if hits and all(h["outcome"] == "answered" for h in hits):
+            ap = [h["rows"][0]["code"] for h in hits]
     if fl and (mins or hrs):
         d = int(mins.group(1)) if mins else int(float(hrs.group(1)) * 60)
         res, tool, args = t.propagate_delay([{"flight": fl.group(1), "delay": d}], 8), "propagate_delay", {"flight": fl.group(1), "delay": d}
@@ -195,6 +201,8 @@ def route(q, t: Tools):
     elif re.search(r"\bOVER\b|\bPAST\b|ILLEGAL|BREACH|TIMED? ?OUT|DUTY LIMIT|FDP", u) and re.search(r"CREW|PILOT|DUTY|FDP", u):
         a = ap[-1] if ap else None
         res, tool, args = t.crews_over_limit(a), "crews_over_limit", {"airport": a}
+    elif cap and len(ap) >= 2:
+        res, tool, args = t.rescue_capacity(ap[0], ap[1]), "rescue_capacity", {"origin": ap[0], "dest": ap[1]}
     elif re.search(r"RESERVE|COVER|CREW AT", u) and ap:
         res, tool, args = t.find_reserve(ap[-1], minutes_needed=300), "find_reserve", {"airport": ap[-1]}
     elif re.search(r"CRITICAL|LOAD.BEARING|MOST IMPORTANT", u):
@@ -202,7 +210,10 @@ def route(q, t: Tools):
         res, tool, args = t.critical_flights(day, 10), "critical_flights", {"date": day}
     elif re.search(r"RIGHT NOW|LIVE|TODAY|FAA|GROUND STOP|WEATHER|METAR", u):
         from irops import live
-        live.refresh(t)
+        try:
+            live.refresh(t)
+        except Exception:  # feeds unreachable: answer from the last live layer in the graph
+            pass
         a = ap[-1] if ap else None
         res, tool, args = t.live_conditions(a), "live_conditions", {"airport": a}
     elif re.search(r"\bC\d{4}\b|\bR-[A-Z]{3}-\d{3}\b", u):
@@ -219,7 +230,7 @@ def route(q, t: Tools):
         res, tool, args = t.disrupted_bookings(20), "disrupted_bookings", {}
     else:
         return {"by": "router", "answer": f"Try: 'What breaks if {c}2262 2022-12-22 DEN is 2h late?', "
-                "'Who can cover a crew at Denver?', 'Which crews are over their duty limit at DEN?', 'Weather at SEA right now', 'Rebook B09455', 'Which flights are load-bearing?', "
+                "'Who can cover a crew at Denver?', 'Which crews are over their duty limit at DEN?', 'Weather at SEA right now', 'How many passengers can we still move from DEN to BOS?', 'Rebook B09455', 'Which flights are load-bearing?', "
                 "'Which airports are cut off?', 'What do we remember about DEN?'", "calls": []}
     return {"by": "router", "answer": _say(tool, res),
             "calls": [{"tool": tool, "args": args, "outcome": res["outcome"], "rows": res["rows"][:12],
@@ -259,6 +270,12 @@ def _say(tool, r):
         bits = [f"{x['airport']} ({'; '.join(l['kind'] for l in x['live'])}; {int(x['daily_flights'] or 0)} flights/day touch it)"
                 for x in rows[:5]]
         return f"Right now (FAA {f.get('faa_time', '?')}): " + ", ".join(bits) + "."
+    if tool == "rescue_capacity":
+        legs = ", ".join(f"{x['from']}->{x['to']} {int(x['flow'])}" for x in rows[:5])
+        return (f"At most {r['max_passengers']} more passengers can get from {r['origin']} to {r['dest']} in the next "
+                f"{r['hours']}h (max flow over free seats on flights still to depart; connection times not checked, so "
+                f"an upper bound). Limited by {r['bottleneck']} ({r['seats_out']} seats out, {r['seats_in']} in). "
+                f"Last legs in: {legs}.")
     if tool == "crew_duty":
         last = rows[-1]
         return (f"{len(rows)} legs; duty limit {last['fdp_limit']} min, projected use {last['fdp_used']} min "

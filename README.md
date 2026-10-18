@@ -52,7 +52,10 @@ cites the regulation it relies on, and waits for a human to approve it.
 9. **Bring your own agent (MCP).** The read-only tool catalogue is also served as an MCP server at `/mcp/`
    (streamable HTTP) and over stdio: `claude mcp add --transport http irops-brain https://irops-brain.vercel.app/mcp/`.
    Besides the tools (including `crews_over_limit`, which projects the delays now in the graph onto every crew's
-   duty limit, per airport, and `live_conditions` for any one airport's current METAR) it serves a `decision_log` tool (every proposal and what a human did with it), the resources
+   duty limit, per airport, and `live_conditions` for any one airport's current METAR, and `rescue_capacity`, a
+   max flow (`algo.maxFlow`) over the route network with each route's free seats on flights still to depart as its
+   capacity: the most stranded passengers the network can still carry from A to B, and whether seats out, seats in
+   or the routes between are the bottleneck) it serves a `decision_log` tool (every proposal and what a human did with it), the resources
    `irops://{airline}/rules` and `irops://{airline}/lessons`, and a `disruption_briefing` prompt that walks an outside
    agent through the same steps the in-app agents take.
 
@@ -178,6 +181,15 @@ CALL algo.betweenness({nodeLabels: ['Active'], relationshipTypes: ['NEXT_LEG','C
 ```cypher
 CALL algo.WCC({nodeLabels: ['Airport', 'Active'], relationshipTypes: ['DEPARTS_FROM', 'ARRIVES_AT']})
 YIELD node, componentId
+```
+
+**How many stranded passengers can the network still carry: max flow**, each route's capacity the free seats on
+its active flights still to depart (an upper bound, connection times are not checked; whatever exceeds it can only
+be refunded):
+```cypher
+MATCH (s:Airport {code: $o}), (t:Airport {code: $d})
+CALL algo.maxFlow({sourceNodes: [s], targetNodes: [t], relationshipTypes: ['ROUTE'], capacityProperty: 'free'})
+YIELD edges, edgeFlows, maxFlow
 ```
 
 **Two agents, one reserve: atomic claim.** FalkorDB runs each write query alone, so check-and-claim in one query

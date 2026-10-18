@@ -165,7 +165,8 @@ function pickScenario() {
     : "What breaks if WN2262 2022-12-22 DEN is 2h late?";
   const ap = CARRIER(tenant) === "AS" ? "SEA" : "DEN";
   $("examples").replaceChildren(...[`Which crews are over their duty limit at ${ap}?`, `Who can cover a crew at ${ap}?`,
-    `Weather at ${ap} right now`, "Which flights are the most load-bearing?"].map((x) =>
+    `Weather at ${ap} right now`, `How many passengers can we still move from ${ap} to ${ap === "SEA" ? "ANC" : "BOS"}?`,
+    "Which flights are the most load-bearing?"].map((x) =>
     el("button", { type: "button", onclick: () => { $("q").value = x; $("ask-form").requestSubmit(); } }, x)));
 }
 

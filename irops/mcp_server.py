@@ -97,6 +97,15 @@ def disrupted_bookings(airline: str, limit: int = 20) -> dict:
     return _out(_t(airline).disrupted_bookings(limit))
 
 
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, idempotentHint=True, openWorldHint=False))
+def rescue_capacity(airline: str, origin: str, dest: str, hours: int = 24) -> dict:
+    """Most passengers the rest of the network can still move from origin to dest within `hours`: max flow over the
+    route network, each route's capacity the free seats on its active flights still to depart. An upper bound
+    (connection times are not checked): stranded passengers beyond it can only be refunded. Says whether seats out,
+    seats in or the routes between are the bottleneck. Writes only the derived free-seat count onto each route."""
+    return _out(_t(airline).rescue_capacity(origin, dest, max(1, min(hours, 48))))
+
+
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, idempotentHint=True, openWorldHint=True))
 def live_conditions(airline: str, airport: str = "") -> dict:
     """Airports in the airline's network constrained RIGHT NOW: FAA ground stops, ground delay programs, delays and
@@ -106,7 +115,10 @@ def live_conditions(airline: str, airport: str = "") -> dict:
     METAR and FAA entries even when it is not constrained."""
     from irops import live
     t = _t(airline)
-    feed = live.refresh(t)
+    try:
+        feed = live.refresh(t)
+    except Exception as e:  # FAA unreachable: answer from the last layer in the graph, and say so
+        feed = {"refreshed": False, "error": f"{type(e).__name__}: {e}"[:200]}
     res = _out(t.live_conditions(airport or None))
     return {**res, "feed": {**res.get("feed", {}), **feed}}
 

@@ -321,6 +321,45 @@ class Tools:
         return self._result("answered" if rows else "not_in_graph", rows, paths, start,
                             booking={"id": booking_id, "pax": pax, "stranded_at": at, "dest": dest})
 
+    def rescue_capacity(self, origin, dest, hours=24):
+        """Most passengers the rest of the network can still move from origin to dest in the next `hours`:
+        max flow over the route network, each route's capacity the free seats on its active flights still to
+        depart. Connection times are not checked, so this is an upper bound: if the stranded passengers exceed
+        it, no rebooking plan can carry them all and the rest are refunds. Rows are the last legs into dest (the
+        solver's edge flows can include cycles back through origin, so only flow into the sink is reported)."""
+        start = len(self.trace)
+        o, d = (origin or "").upper(), (dest or "").upper()
+        if o == d or not self._airport(o) or not self._airport(d):
+            return self._result("unknown_entity", start=start)
+        now, hours = self.now(), max(1, min(int(hours), 48))
+        # ponytail: free seats are written onto ROUTE (algo.maxFlow reads an edge property). Idempotent and
+        # derived from the flights, so concurrent callers write the same values.
+        self._run("""MATCH (a:Airport)-[r:ROUTE]->(b:Airport)
+            OPTIONAL MATCH (a)<-[:DEPARTS_FROM]-(f:Flight:Active)-[:ARRIVES_AT]->(b)
+                WHERE f.dep + f.delay >= $now AND f.dep < $now + $h
+            WITH r, sum(CASE WHEN f.seats > f.pax THEN f.seats - f.pax ELSE 0 END) AS free
+            SET r.free = free""", {"now": now, "h": int(hours) * 60}, write=True)
+        rows = self._run("""MATCH (s:Airport {code: $o}), (t:Airport {code: $d})
+            CALL algo.maxFlow({sourceNodes: [s], targetNodes: [t], relationshipTypes: ['ROUTE'],
+                               capacityProperty: 'free'})
+            YIELD edges, edgeFlows, maxFlow
+            UNWIND range(0, size(edges) - 1) AS i
+            WITH maxFlow, startNode(edges[i]).code AS from, endNode(edges[i]).code AS to, edgeFlows[i] AS flow
+            WHERE to = $d AND flow > 0
+            RETURN maxFlow, from, to, flow ORDER BY flow DESC""", {"o": o, "d": d})
+        ends = self._run("""MATCH (s:Airport {code: $o}), (t:Airport {code: $d})
+            OPTIONAL MATCH (s)-[a:ROUTE]->() WITH t, sum(a.free) AS out_seats
+            OPTIONAL MATCH ()-[b:ROUTE]->(t) RETURN out_seats, sum(b.free) AS in_seats""", {"o": o, "d": d})[0]
+        total = int(rows[0]["maxFlow"]) if rows else 0
+        for r in rows:
+            r.pop("maxFlow")
+        out_s, in_s = int(ends["out_seats"] or 0), int(ends["in_seats"] or 0)
+        limit = "seats out of " + o if out_s <= in_s else "seats into " + d
+        if total < min(out_s, in_s):
+            limit = "the connecting routes in between"
+        return self._result("answered" if total else "not_in_graph", rows, start=start, origin=o, dest=d,
+                            hours=int(hours), max_passengers=total, seats_out=out_s, seats_in=in_s, bottleneck=limit)
+
     def _tz(self, code):
         r = self._run("MATCH (a:Airport {code: $c}) RETURN a.tz AS tz", {"c": code})
         return r[0]["tz"] if r else "UTC"
@@ -673,6 +712,11 @@ CATALOGUE = {
                            {"limit": {"type": "integer"}}, ["limit"]),
     "rebook_options": ("k fastest feasible re-routings for a booking (k-shortest paths).",
                        {"booking_id": {"type": "string"}, "k": {"type": "integer"}}, ["booking_id", "k"]),
+    "rescue_capacity": ("Most passengers the rest of the network can still move from one airport to another in the "
+                        "next hours (max flow over free seats on flights still to depart; an upper bound, connection "
+                        "times not checked), and whether seats out, seats in or the routes between are the limit.",
+                        {"origin": {"type": "string"}, "dest": {"type": "string"}, "hours": {"type": "integer"}},
+                        ["origin", "dest"]),
     "live_conditions": ("Airports in the network constrained RIGHT NOW (FAA ground stops/delay programs/closures, "
                         "IFR weather from METAR, and TAF forecasts of IFR, thunderstorms or freezing precipitation in the "
                         "next 12h), with routes and daily flights through each. Pass an airport code for that "

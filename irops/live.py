@@ -116,11 +116,18 @@ def refresh(tools, force=False, lock=None):
         return {"refreshed": False, "fetched": last[0]["t"]}
     codes = [r["code"] for r in g("MATCH (a:Airport) RETURN a.code AS code")]
     icao = icao_map()
+    ids = sorted({icao[c] for c in codes if c in icao})
+    errors = {}
     with httpx.Client(timeout=15, headers={"User-Agent": "irops-brain (graph hackathon demo)"}) as client:
-        faa, faa_time = fetch_faa(client)
-        ids = sorted({icao[c] for c in codes if c in icao})
-        metar = fetch_metar(client, ids)
-        tafs = fetch_taf(client, ids)
+        faa, faa_time = fetch_faa(client)  # the FAA status is the layer's core: if it is down, keep the last layer
+        try:
+            metar = fetch_metar(client, ids)
+        except httpx.HTTPError as e:  # weather is extra: a slow aviationweather.gov must not drop the FAA status
+            metar, errors["metar"] = [], f"{type(e).__name__}: {e}"[:120]
+        try:
+            tafs = fetch_taf(client, ids)
+        except httpx.HTTPError as e:
+            tafs, errors["taf"] = [], f"{type(e).__name__}: {e}"[:120]
     by_icao = {v: k for k, v in icao.items() if k in set(codes)}
     wx = [{"code": by_icao[m["icaoId"]], "cat": m.get("fltCat") or "", "raw": m.get("rawOb", ""),
            "obs": m.get("reportTime", "")} for m in metar if m.get("icaoId") in by_icao]
@@ -136,7 +143,7 @@ def refresh(tools, force=False, lock=None):
                        "detail": "; ".join(f"{', '.join(h['what'])} {z(max(h['from'], now))} to {z(h['to'])} ({h['change']})"
                                            for h in hz[:4])})
     with lock or contextlib.nullcontext():
-        return {**_write(g, mine, wx, faa, faa_time, fc), "tafs": len(tafs)}
+        return {**_write(g, mine, wx, faa, faa_time, fc), "tafs": len(tafs), **({"errors": errors} if errors else {})}
 
 
 def _write(g, mine, wx, faa, faa_time, fc=()):

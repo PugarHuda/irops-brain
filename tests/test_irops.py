@@ -68,6 +68,7 @@ def main():
     other_airline_is_isolated()
     names_and_constraints()
     crews_over_limit_agree_with_propagation()
+    rescue_capacity_is_a_max_flow()
     mcp_serves_the_catalogue()
     live_feeds_land_in_the_graph()
     llm_answers_are_validated()
@@ -161,6 +162,16 @@ def live_feeds_land_in_the_graph():
     finally:
         live.fetch_faa = real
     assert c.get("/api/live").json()["feed"]["refreshed"]
+    # a slow TAF feed costs the forecasts, not the FAA status and METAR fetched alongside it
+    import httpx
+    real, live.fetch_taf = live.fetch_taf, lambda client, ids: (_ for _ in ()).throw(httpx.ReadTimeout("slow"))
+    try:
+        feed = live.refresh(t, force=True)
+        assert feed["refreshed"] and feed["metars"] > 50 and feed["tafs"] == 0 and "ReadTimeout" in feed["errors"]["taf"]
+        assert not t._run("MATCH (l:Live {source: 'TAF'}) RETURN l LIMIT 1")
+    finally:
+        live.fetch_taf = real
+    assert live.refresh(t, force=True)["tafs"] > 50
     # a FalkorDB timeout reaches the browser as a JSON 503 it can explain, not a bare 500
     import redis
     real_run = api.agents.run
@@ -291,6 +302,32 @@ def crews_over_limit_agree_with_propagation():
         t.reset_ops()
 
 
+def rescue_capacity_is_a_max_flow():
+    """Max flow from origin to dest: conserved (what reaches dest is the total), bounded by the seats out and in,
+    and it shrinks when a flight on the way is cancelled."""
+    t = Tools()
+    try:
+        r = t.rescue_capacity("DEN", "BOS")
+        assert r["outcome"] == "answered" and 0 < r["max_passengers"] <= min(r["seats_out"], r["seats_in"]), r
+        assert all(x["to"] == "BOS" for x in r["rows"])
+        assert sum(x["flow"] for x in r["rows"]) == r["max_passengers"]  # everything that reaches the sink
+        assert r["bottleneck"] in ("seats out of DEN", "seats into BOS", "the connecting routes in between")
+        direct = t.rescue_capacity("MDW", "LGA")
+        f = t._run("""MATCH (:Airport {code: 'MDW'})<-[:DEPARTS_FROM]-(f:Flight:Active)-[:ARRIVES_AT]->(:Airport {code: 'LGA'})
+            WHERE f.dep >= $now AND f.seats > f.pax RETURN f.id AS id ORDER BY f.dep LIMIT 1""", {"now": t.now()})
+        if f:
+            t.cancel_with_return(f[0]["id"], reason="test")
+            after = t.rescue_capacity("MDW", "LGA")
+            assert after["seats_out"] < direct["seats_out"] and after["max_passengers"] <= direct["max_passengers"]
+        assert t.rescue_capacity("ZZZ", "BOS")["outcome"] == "unknown_entity"
+        assert t.rescue_capacity("DEN", "DEN")["outcome"] == "unknown_entity"
+        c = route("How many passengers can we still move from Denver to Boston?", t)["calls"][0]
+        assert c["tool"] == "rescue_capacity" and c["args"] == {"origin": "DEN", "dest": "BOS"}, c
+        assert route("Seat capacity DEN to LAS", t)["calls"][0]["tool"] == "rescue_capacity"
+    finally:
+        t.reset_ops()
+
+
 def mcp_serves_the_catalogue():
     import anyio
     from mcp.client.client import Client
@@ -299,9 +336,11 @@ def mcp_serves_the_catalogue():
     async def go():
         async with Client(mcp) as c:
             tools = {x.name: x for x in (await c.list_tools()).tools}
-            assert {"propagate_delay", "find_reserve", "rebook_options", "recall", "crews_over_limit"} <= set(tools)
-            # every tool is read-only except the live refresh, which writes the live layer and says so
-            assert all(x.annotations.read_only_hint for n, x in tools.items() if n != "live_conditions")
+            assert {"propagate_delay", "find_reserve", "rebook_options", "recall", "crews_over_limit",
+                    "rescue_capacity"} <= set(tools)
+            # every tool is read-only except the live refresh and the free-seat count max flow reads, which say so
+            assert all(x.annotations.read_only_hint for n, x in tools.items()
+                       if n not in ("live_conditions", "rescue_capacity"))
             assert tools["live_conditions"].annotations.open_world_hint
             r = await c.call_tool("resolve_airport", {"airline": "WN", "name": "Midway"})
             assert "MDW" in r.content[0].text, r
