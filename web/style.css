@@ -164,7 +164,8 @@ pre { font: 12px/1.45 var(--code); background: white; border: 1px solid var(--ha
 .examples button { background: white; border: 1.5px solid var(--line); border-radius: 999px; padding: 6px 14px; font-size: .88rem; }
 .examples button:hover { border-color: var(--ink); }
 .answer { margin-top: 14px; max-width: 900px; }
-.answer .text { font-size: 1.05rem; background: white; border: 1.5px solid var(--line); border-radius: 14px; padding: 14px 16px; white-space: pre-wrap; }
+.answer .text { font-size: 1.05rem; background: white; border: 1.5px solid var(--line); border-radius: 14px; padding: 14px 16px; }
+.answer .text p { margin: 0 0 8px; } .answer .text ul { margin: 0 0 8px; padding-left: 1.3rem; } .answer .text > :last-child { margin-bottom: 0; }
 .answer .by { color: var(--ink-soft); font-size: .85rem; }
 
 /* proof */

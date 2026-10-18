@@ -319,6 +319,22 @@ function renderTrace(steps) {
 }
 
 // ---------- ask ----------
+// the models answer in light markdown: paragraphs, "- " bullets and **bold**, built as DOM nodes (never innerHTML)
+function inline(line) {
+  return line.split(/\*\*(.+?)\*\*/g).map((part, i) => (i % 2 ? el("strong", {}, part) : part));
+}
+function prose(text) {
+  const out = [];
+  let list = null;
+  for (const raw of String(text || "").split(/\n+/)) {
+    const line = raw.trim();
+    if (!line) continue;
+    const item = line.match(/^(?:[-*•]|\d+[.)])\s+(.*)$/);
+    if (item) { if (!list) out.push(list = el("ul", {})); list.append(el("li", {}, ...inline(item[1]))); }
+    else { list = null; out.push(el("p", {}, ...inline(line.replace(/^#+\s*/, "")))); }
+  }
+  return out;
+}
 $("ask-form").addEventListener("submit", async (ev) => {
   ev.preventDefault();
   const q = $("q").value.trim() || $("q").placeholder;
@@ -327,7 +343,7 @@ $("ask-form").addEventListener("submit", async (ev) => {
   try {
     const r = await api("/api/ask", { question: q, tenant });
     const paths = r.calls.flatMap((c) => c.paths || []);
-    box.replaceChildren(el("p", { class: "text" }, r.answer), ...(r.note ? [el("p", { class: "by" }, r.note)] : []),
+    box.replaceChildren(el("div", { class: "text" }, ...prose(r.answer)), ...(r.note ? [el("p", { class: "by" }, r.note)] : []),
       el("p", { class: "by" }, `${r.by === "router" ? "Answered by the intent router, using" : `${r.by}, using`} ${r.calls.map((c) => c.tool).join(", ") || "no tool"}`),
       ...r.calls.map((c) => el("details", {}, el("summary", {}, `${c.tool}: ${c.outcome}`), c.cypher.map((x) => el("pre", {}, x)))));
     if (paths.length) showPaths(paths, q);

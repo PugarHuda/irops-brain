@@ -87,7 +87,7 @@ def llm_answers_are_validated():
 
     def script(*replies):
         it = iter(replies)
-        llm._chat = lambda messages, tools=None: {"model": "scripted", "choices": [{"message": next(it)}]}
+        llm._chat = lambda messages, tools=None, **k: {"model": "scripted", "choices": [{"message": next(it)}]}
 
     call = {"tool_calls": [{"id": "1", "function": {"name": "resolve_flight", "arguments": '{"ref": "WN2262 2022-12-22 DEN"}'}}]}
     try:
@@ -103,7 +103,20 @@ def llm_answers_are_validated():
         # the free quota is rationed per visitor, and a 429 pauses the LLM instead of failing every question
         assert all(llm._budget("visitor") is None for _ in range(llm.PER_CLIENT_HOUR)) and llm._budget("visitor")
 
-        def limited(messages, tools=None):
+        # a model that keeps calling tools past the time budget: the router answers instead, and says why
+        import time as _time
+        budget, llm.ANSWER_BUDGET_S = llm.ANSWER_BUDGET_S, 4
+
+        def slow(messages, tools=None, timeout=90):
+            assert timeout <= 4  # each call only gets what is left of the budget
+            _time.sleep(1.5)
+            return {"model": "slow", "choices": [{"message": call}]}
+        llm._chat = slow
+        r = llm.ask("Where is WN2262 2022-12-22 DEN?", client="patient")
+        assert r["by"] == "router" and "took over 4 s" in r["note"], r
+        llm.ANSWER_BUDGET_S = budget
+
+        def limited(messages, tools=None, **k):
             raise RuntimeError("429 free-models-per-day")
         llm._chat = limited
         assert "rate limit" in llm.ask("Is crew C0464 legal?", client="other")["note"]

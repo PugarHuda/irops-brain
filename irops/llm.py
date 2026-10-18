@@ -45,12 +45,12 @@ def tool_specs():
         for n, (d, p, r) in CATALOGUE.items()]
 
 
-def _chat(messages, tools=None):
+def _chat(messages, tools=None, timeout=90):
     body = {"models": MODELS, "messages": messages, "max_tokens": 2000, "temperature": 0.2,
             "reasoning": {"exclude": True}}  # free reasoning models: keep their thinking out of the answer
     if tools:
         body["tools"] = tools
-    r = httpx.post(URL, json=body, timeout=90, headers={
+    r = httpx.post(URL, json=body, timeout=timeout, headers={
         "Authorization": f"Bearer {os.environ['OPENROUTER_API_KEY']}",
         "HTTP-Referer": "https://irops-brain.onrender.com", "X-Title": "IROPS Brain"})
     r.raise_for_status()
@@ -89,6 +89,7 @@ def _text(msg):
 # spend it all. ponytail: in-memory budget per client and a pause after a 429; a shared store if this ever runs
 # on more than one process.
 PER_CLIENT_HOUR = 6
+ANSWER_BUDGET_S = 40  # a visitor waits at most this long for the free models before the router answers instead
 COOLDOWN_S = 600
 _asked: dict = {}
 _quiet_until = 0.0
@@ -137,8 +138,12 @@ def _ask_llm(question, t: Tools):
     messages = [{"role": "system", "content": SYSTEM + clock}, {"role": "user", "content": question}]
     calls, model, msg = [], None, {}
     seen = set(IDS.findall(question.upper().translate(DASHES)))  # ids the user typed may be named back to them
+    deadline = time.time() + ANSWER_BUDGET_S
     for _ in range(8):
-        data = _chat(messages, tool_specs())
+        left = deadline - time.time()
+        if left < 3:
+            raise TimeoutError(f"the free models took over {ANSWER_BUDGET_S} s")
+        data = _chat(messages, tool_specs(), timeout=left)
         model = data.get("model", model)
         msg = data["choices"][0]["message"]
         tool_calls = msg.get("tool_calls") or []
