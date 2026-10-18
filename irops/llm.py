@@ -237,7 +237,12 @@ def route(q, t: Tools):
         return {"by": "router", "answer": f"Try: 'What breaks if {c}2262 2022-12-22 DEN is 2h late?', "
                 "'Who can cover a crew at Denver?', 'Which crews are over their duty limit at DEN?', 'Weather at SEA right now', 'How many passengers can we still move from DEN to BOS?', 'Rebook B09455', 'Which flights are load-bearing?', "
                 "'Which airports are cut off?', 'What do we remember about DEN?'", "calls": []}
-    return {"by": "router", "answer": _say(tool, res),
+    answer = _say(tool, res)
+    if res["outcome"] == "not_in_graph":  # say which moment the graph holds, so "no record" is not read as "all clear"
+        when = EPOCH + timedelta(minutes=t.now())
+        answer += (f" The graph holds the replay as of {when:%a %d %b %Y %H:%M} UTC, with only the delays known then; "
+                   "run a scenario above to load another moment.")
+    return {"by": "router", "answer": answer,
             "calls": [{"tool": tool, "args": args, "outcome": res["outcome"], "rows": res["rows"][:12],
                        "paths": res["paths"][:12], "cypher": res["cypher"]}]}
 
