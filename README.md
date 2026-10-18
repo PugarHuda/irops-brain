@@ -50,7 +50,9 @@ cites the regulation it relies on, and waits for a human to approve it.
    weather and the TAF forecast for every airport in the network (the next 12 hours, flagged when a period is IFR or
    LIFR by the FAA ceiling/visibility definition, or forecasts thunderstorms or freezing precipitation, the de-icing
    trigger behind Elliott) are written into each airline's graph as `(:Live)-[:AT]->(:Airport)`
-   nodes (refreshed at most every 5 minutes), then matched against the route network: how many routes and daily
+   nodes, alongside live ADS-B positions from the OpenSky Network (the airline's aircraft airborne now, and how many
+   are on the ground at each airport, matched by callsign and distance); the live layer is
+   refreshed at most every 5 minutes (ADS-B every 15, inside OpenSky's anonymous quota), then matched against the route network: how many routes and daily
    flights touch each constrained airport, how many passengers connect there a day (from the `PAX_CONNECT`
    edges), how central it is (`algo.pageRank` over the route network), and which spoke airports depend on it.
 9. **Bring your own agent (MCP).** The read-only tool catalogue is also served as an MCP server at `/mcp/`

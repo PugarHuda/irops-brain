@@ -145,11 +145,14 @@ async function loadLive() {
       ? `The live feeds could not be reached (${r.feed.error}). Showing the last layer stored in the graph.`
       : `FAA status as of ${when}. METAR for ${r.weather_categories.reduce((n, c) => n + c.airports, 0)} airports in ${CARRIER(tenant)}'s network: `
         + r.weather_categories.map((c) => `${c.airports} ${c.cat || "without a flight category"}`).join(", ") + ". "
-        + `TAF forecasts flag ${r.rows.filter((x) => x.live.some((l) => l.source === "TAF")).length} of them for the next 12 hours.`;
+        + `TAF forecasts flag ${r.rows.filter((x) => x.live.some((l) => l.source === "TAF")).length} of them for the next 12 hours.`
+        + (r.feed.aircraft_airborne != null ? ` OpenSky ADS-B sees ${fmt(r.feed.aircraft_airborne)} ${CARRIER(tenant)} aircraft airborne and `
+          + `${fmt(r.feed.aircraft_on_ground)} on the ground right now.` : "");
     if (!r.rows.length) { list.replaceChildren(el("li", { class: "empty" }, "Nothing in this network is constrained right now.")); return; }
     list.replaceChildren(...r.rows.map((x) => el("li", {},
       el("b", {}, x.airport), ` ${x.name || ""} · ${fmt(x.routes)} routes, ${fmt(x.daily_flights)} flights a day touch it`
-        + (x.network_rank ? `, ${fmt(x.connecting_pax_per_day)} passengers a day connect here, ${ordinal(x.network_rank)} most central of ${x.airports_ranked} (PageRank)` : ""),
+        + (x.network_rank ? `, ${fmt(x.connecting_pax_per_day)} passengers a day connect here, ${ordinal(x.network_rank)} most central of ${x.airports_ranked} (PageRank)` : "")
+        + (x.aircraft_on_ground_now ? `, ${x.aircraft_on_ground_now} of the airline's aircraft on the ground there now (ADS-B)` : ""),
       x.spokes_mostly_served_from_here.length ? ` · mostly serves ${x.spokes_mostly_served_from_here.join(", ")}` : "",
       el("ul", {}, x.live.map((l) => el("li", {}, el("span", { class: `src ${l.source}` }, l.source), ` ${l.kind}: `,
         el("code", {}, l.reason), l.detail ? ` (${l.detail})` : ""))))));

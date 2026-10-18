@@ -6,6 +6,8 @@ Sources (public, no key):
   aviationweather  https://aviationweather.gov/api/data/metar                 current METAR, flight category
                    https://aviationweather.gov/api/data/taf                   TAF forecast: IFR/LIFR, thunderstorms
                                                                               and freezing precipitation in the next 12h
+  OpenSky Network  https://opensky-network.org/api/states/all               live ADS-B positions: the airline's
+                                                                              aircraft airborne and on the ground now
 
 Each refresh replaces the (:Live) nodes of one graph and links them to the airports they affect, so agents and
 MCP clients read live constraints with the same graph queries as everything else. The flight schedule is the
@@ -13,6 +15,7 @@ December 2022 replay; the live layer shows how today's constraints would land on
 """
 import contextlib
 import csv
+import math
 import time
 
 import httpx
@@ -26,6 +29,39 @@ MAX_AGE_S = 300   # the FAA feed updates every few minutes; don't hammer it
 CONSTRAINED = {"IFR", "LIFR"}
 TAF_URL = "https://aviationweather.gov/api/data/taf"
 HORIZON_S = 12 * 3600
+OPENSKY_URL = "https://opensky-network.org/api/states/all"
+OPENSKY_BOX = {"lamin": 17, "lomin": -170, "lamax": 72, "lomax": -60}  # the US, Alaska, Hawaii, Puerto Rico
+# ponytail: anonymous OpenSky allows 400 credits a day and this box costs 4, so one fetch every 15 min serves
+# every airline graph in this process. A free account (OPENSKY_USER) would allow far more.
+OPENSKY_AGE_S = 900
+CALLSIGN = {"WN": "SWA", "AS": "ASA"}  # ICAO airline designators in ADS-B callsigns
+NEAR_DEG = 0.05                         # ~5 km: an aircraft on the ground this close is at the airport
+_sky = {"t": 0.0, "states": None, "time": None}
+
+
+def fetch_opensky(client):
+    """Every ADS-B state vector over the box, cached for OPENSKY_AGE_S across graphs."""
+    if _sky["states"] is None or time.time() - _sky["t"] >= OPENSKY_AGE_S:
+        r = client.get(OPENSKY_URL, params=OPENSKY_BOX, timeout=30)
+        r.raise_for_status()
+        d = r.json()
+        _sky.update(t=time.time(), states=d.get("states") or [], time=d.get("time"))
+    return _sky["states"], _sky["time"]
+
+
+def adsb(states, prefix, airports):
+    """The airline's aircraft (by callsign prefix): how many are airborne, how many on the ground, and how many on
+    the ground at each airport (within NEAR_DEG). `airports` is [{code, lat, lon}]."""
+    mine = [x for x in states if (x[1] or "").strip().startswith(prefix) and x[5] is not None and x[6] is not None]
+    ground = [x for x in mine if x[8]]
+    at = {}
+    for a in airports:
+        if a["lat"] is None:
+            continue
+        k = NEAR_DEG / max(0.2, math.cos(math.radians(a["lat"])))
+        n = sum(1 for x in ground if abs(x[6] - a["lat"]) <= NEAR_DEG and abs(x[5] - a["lon"]) <= k)
+        at[a["code"]] = n
+    return {"airborne": len(mine) - len(ground), "on_ground": len(ground), "at": at}
 
 
 def _vis(v):
@@ -114,7 +150,8 @@ def refresh(tools, force=False, lock=None):
     last = g("MATCH (f:LiveFeed {id: 'feed'}) RETURN f.fetched AS t")
     if last and not force and time.time() - last[0]["t"] < MAX_AGE_S:
         return {"refreshed": False, "fetched": last[0]["t"]}
-    codes = [r["code"] for r in g("MATCH (a:Airport) RETURN a.code AS code")]
+    aps = g("MATCH (a:Airport) RETURN a.code AS code, a.lat AS lat, a.lon AS lon")
+    codes = [r["code"] for r in aps]
     icao = icao_map()
     ids = sorted({icao[c] for c in codes if c in icao})
     errors = {}
@@ -128,6 +165,12 @@ def refresh(tools, force=False, lock=None):
             tafs = fetch_taf(client, ids)
         except httpx.HTTPError as e:
             tafs, errors["taf"] = [], f"{type(e).__name__}: {e}"[:120]
+        sky = None
+        try:
+            states, sky_time = fetch_opensky(client)
+            sky = {**adsb(states, CALLSIGN.get(tools.carrier, tools.carrier), aps), "time": sky_time}
+        except (httpx.HTTPError, ValueError) as e:  # rate-limited or down: keep the last ADS-B counts in the graph
+            errors["adsb"] = f"{type(e).__name__}: {e}"[:120]
     by_icao = {v: k for k, v in icao.items() if k in set(codes)}
     wx = [{"code": by_icao[m["icaoId"]], "cat": m.get("fltCat") or "", "raw": m.get("rawOb", ""),
            "obs": m.get("reportTime", "")} for m in metar if m.get("icaoId") in by_icao]
@@ -143,7 +186,14 @@ def refresh(tools, force=False, lock=None):
                        "detail": "; ".join(f"{', '.join(h['what'])} {z(max(h['from'], now))} to {z(h['to'])} ({h['change']})"
                                            for h in hz[:4])})
     with lock or contextlib.nullcontext():
-        return {**_write(g, mine, wx, faa, faa_time, fc), "tafs": len(tafs), **({"errors": errors} if errors else {})}
+        out = {**_write(g, mine, wx, faa, faa_time, fc), "tafs": len(tafs), **({"errors": errors} if errors else {})}
+        if sky:
+            g("UNWIND $rows AS r MATCH (a:Airport {code: r.code}) SET a.adsb_ground = r.n",
+              {"rows": [{"code": c, "n": n} for c, n in sky["at"].items()]}, write=True)
+            g("MATCH (f:LiveFeed {id: 'feed'}) SET f.adsb_airborne = $a, f.adsb_ground = $gr, f.adsb_time = $t",
+              {"a": sky["airborne"], "gr": sky["on_ground"], "t": sky["time"]}, write=True)
+            out["adsb"] = {k: v for k, v in sky.items() if k != "at"}
+        return out
 
 
 def _write(g, mine, wx, faa, faa_time, fc=()):

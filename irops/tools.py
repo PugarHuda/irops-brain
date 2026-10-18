@@ -607,7 +607,8 @@ class Tools:
         depend on it for most of their service. With `airport`: that airport's current METAR and any FAA
         entry, constrained or not."""
         start = len(self.trace)
-        feed = self._run("MATCH (f:LiveFeed {id: 'feed'}) RETURN f.fetched AS fetched, f.faa_time AS faa_time")
+        feed = self._run("""MATCH (f:LiveFeed {id: 'feed'}) RETURN f.fetched AS fetched, f.faa_time AS faa_time,
+            f.adsb_airborne AS aircraft_airborne, f.adsb_ground AS aircraft_on_ground, f.adsb_time AS adsb_time""")
         if not feed:
             return self._result("not_in_graph", start=start, reason="live feed never refreshed")
         ap = (airport or "").upper() or None
@@ -627,7 +628,8 @@ class Tools:
             WITH a, live, routes, daily_flights,
                  collect(DISTINCT CASE WHEN s IS NOT NULL AND via * 2 >= total THEN s.code END) AS dependent
             RETURN a.code AS airport, a.name AS name, a.wx_cat AS flight_category, a.wx_raw AS metar,
-                   a.wx_at AS observed, routes, daily_flights, dependent AS spokes_mostly_served_from_here, live
+                   a.wx_at AS observed, routes, daily_flights, dependent AS spokes_mostly_served_from_here, live,
+                   a.adsb_ground AS aircraft_on_ground_now
             ORDER BY daily_flights DESC""", {"ap": ap})
         if rows:  # how central each airport is (PageRank over routes) and how many passengers connect there
             rank = {r["code"]: i + 1 for i, r in enumerate(self._run(
