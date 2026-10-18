@@ -51,7 +51,7 @@ cites the regulation it relies on, and waits for a human to approve it.
    LIFR by the FAA ceiling/visibility definition, or forecasts thunderstorms or freezing precipitation, the de-icing
    trigger behind Elliott) are written into each airline's graph as `(:Live)-[:AT]->(:Airport)`
    nodes, alongside live ADS-B: how many of the airline's aircraft (by ICAO callsign) are on the ground at each
-   flagged airport right now (adsb.lol), and national airborne/on-ground totals from the OpenSky Network when it
+   flagged airport right now (adsb.lol, falling back to adsb.fi), and national airborne/on-ground totals from the OpenSky Network when it
    answers (it refuses many cloud IPs, so the hosted demo may show only the per-airport counts). The layer is
    refreshed at most every 5 minutes (OpenSky every 15, inside its anonymous quota), then matched against the route network: how many routes and daily
    flights touch each constrained airport, how many passengers connect there a day (from the `PAX_CONNECT`

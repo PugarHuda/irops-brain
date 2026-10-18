@@ -172,6 +172,25 @@ def live_feeds_land_in_the_graph():
           [0, "SWA3", "", 0, 0, -104.67, 39.86, 9000, False], [0, "UAL4", "", 0, 0, -104.67, 39.86, 0, True]]
     sky = live.adsb(st, "SWA", [{"code": "DEN", "lat": 39.86, "lon": -104.67}])
     assert sky == {"airborne": 1, "on_ground": 2, "at": {"DEN": 1}}, sky
+    # a source that refuses (429) hands the remaining airports to the next one; if all refuse, it is an error
+    def transport(lol, fi):
+        def h(req):
+            if "adsb.lol" in req.url.host:
+                return httpx.Response(lol)
+            return httpx.Response(fi, json={"aircraft": [{"flight": "SWA9 ", "alt_baro": "ground"},
+                                                         {"flight": "SWA8", "alt_baro": 3000}, {"flight": "UAL1", "alt_baro": "ground"}]})
+        return httpx.Client(transport=httpx.MockTransport(h))
+    import httpx
+    live._ground.clear()
+    aps2 = [{"code": "DEN", "lat": 39.86, "lon": -104.67}, {"code": "MDW", "lat": 41.79, "lon": -87.75}]
+    assert live.ground_at(transport(429, 200), "SWA", aps2) == {"DEN": 1, "MDW": 1}
+    live._ground.clear()
+    try:
+        live.ground_at(transport(429, 429), "SWA", aps2)
+        raise AssertionError("every source refusing must be reported")
+    except httpx.HTTPStatusError:
+        pass
+    live._ground.clear()
     # adsb.lol counts the airline's aircraft on the ground at every flagged airport, and only there
     feed = live.refresh(t, force=True)
     ground = feed["adsb_ground_at"]

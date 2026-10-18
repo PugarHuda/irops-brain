@@ -6,7 +6,7 @@ Sources (public, no key):
   aviationweather  https://aviationweather.gov/api/data/metar                 current METAR, flight category
                    https://aviationweather.gov/api/data/taf                   TAF forecast: IFR/LIFR, thunderstorms
                                                                               and freezing precipitation in the next 12h
-  adsb.lol         https://api.adsb.lol/v2/point/{lat}/{lon}/{nm}            live ADS-B around each flagged airport:
+  adsb.lol/adsb.fi https://api.adsb.lol/v2/point, opendata.adsb.fi/api/v2   live ADS-B around each flagged airport:
                                                                               the airline's aircraft on the ground there
   OpenSky Network  https://opensky-network.org/api/states/all               national ADS-B totals, airborne and on the
                                                                               ground (it refuses many cloud IPs; the totals
@@ -40,7 +40,9 @@ OPENSKY_AGE_S = 900
 CALLSIGN = {"WN": "SWA", "AS": "ASA"}  # ICAO airline designators in ADS-B callsigns
 NEAR_DEG = 0.05                         # ~5 km: an aircraft on the ground this close is at the airport
 _sky = {"t": 0.0, "states": None, "time": None}
-ADSBLOL_URL = "https://api.adsb.lol/v2/point/{lat}/{lon}/{nm}"
+# point queries, tried in order: when one refuses (429), the remaining airports go to the next
+ADSB_SOURCES = [("adsb.lol", "https://api.adsb.lol/v2/point/{lat}/{lon}/{nm}", "ac"),
+                ("adsb.fi", "https://opendata.adsb.fi/api/v2/lat/{lat}/lon/{lon}/dist/{nm}", "aircraft")]
 GROUND_NM = 3  # nautical miles around the airport reference point
 
 
@@ -48,25 +50,30 @@ _ground = {}  # (callsign prefix, airport) -> (fetched, count), shared by every 
 
 
 def ground_at(client, prefix, airports):
-    """The airline's aircraft reporting on the ground within GROUND_NM of each airport, from adsb.lol. Requests are
-    spaced and cached for MAX_AGE_S; if adsb.lol rate-limits, the airports counted so far are returned and the
-    rest get no count rather than a guess."""
-    at, calls = {}, 0
+    """The airline's aircraft reporting on the ground within GROUND_NM of each airport, from the first ADS-B source
+    that answers. Requests are spaced and cached for MAX_AGE_S; if every source refuses, the airports counted so far
+    are returned and the rest get no count rather than a guess."""
+    at, calls, src = {}, 0, 0
     for a in airports:
         hit = _ground.get((prefix, a["code"]))
         if hit and time.time() - hit[0] < MAX_AGE_S:
             at[a["code"]] = hit[1]
             continue
-        if calls:
-            time.sleep(0.5)  # ponytail: spaced to stay inside adsb.lol fair use; a 429 just ends the round early
-        calls += 1
-        r = client.get(ADSBLOL_URL.format(lat=round(a["lat"], 4), lon=round(a["lon"], 4), nm=GROUND_NM), timeout=15)
+        while True:
+            if calls:
+                time.sleep(1.1)  # ponytail: adsb.fi asks for at most 1 request/s; ~10 flagged airports = ~11 s
+            calls += 1
+            _, url, key = ADSB_SOURCES[src]
+            r = client.get(url.format(lat=round(a["lat"], 4), lon=round(a["lon"], 4), nm=GROUND_NM), timeout=15)
+            if r.status_code != 429 or src == len(ADSB_SOURCES) - 1:
+                break
+            src += 1  # this source refuses us: the rest go to the next one
         if r.status_code == 429:
-            if not at:  # refused before counting anything: that is an outage, say so
+            if not at:  # every source refused before counting anything: that is an outage, say so
                 r.raise_for_status()
             break
         r.raise_for_status()
-        n = sum(1 for x in r.json().get("ac") or []
+        n = sum(1 for x in r.json().get(key) or []
                 if (x.get("flight") or "").strip().startswith(prefix) and x.get("alt_baro") == "ground")
         at[a["code"]] = n
         _ground[(prefix, a["code"])] = (time.time(), n)
