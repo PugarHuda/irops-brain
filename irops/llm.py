@@ -274,7 +274,7 @@ def _say(tool, r):
         legs = ", ".join(f"{x['from']}->{x['to']} {int(x['flow'])}" for x in rows[:5])
         return (f"At most {r['max_passengers']} more passengers can get from {r['origin']} to {r['dest']} in the next "
                 f"{r['hours']}h (max flow over free seats on flights still to depart; connection times not checked, so "
-                f"an upper bound). Limited by {r['bottleneck']} ({r['seats_out']} seats out, {r['seats_in']} in). "
+                f"an upper bound). Limited by {r['bottleneck']} ({r['seats_leaving_origin']} free seats leave {r['origin']}, {r['seats_arriving_dest']} arrive at {r['dest']}). "
                 f"Last legs in: {legs}.")
     if tool == "crew_duty":
         last = rows[-1]

@@ -308,7 +308,7 @@ def rescue_capacity_is_a_max_flow():
     t = Tools()
     try:
         r = t.rescue_capacity("DEN", "BOS")
-        assert r["outcome"] == "answered" and 0 < r["max_passengers"] <= min(r["seats_out"], r["seats_in"]), r
+        assert r["outcome"] == "answered" and 0 < r["max_passengers"] <= min(r["seats_leaving_origin"], r["seats_arriving_dest"]), r
         assert all(x["to"] == "BOS" for x in r["rows"])
         assert sum(x["flow"] for x in r["rows"]) == r["max_passengers"]  # everything that reaches the sink
         assert r["bottleneck"] in ("seats out of DEN", "seats into BOS", "the connecting routes in between")
@@ -318,7 +318,7 @@ def rescue_capacity_is_a_max_flow():
         if f:
             t.cancel_with_return(f[0]["id"], reason="test")
             after = t.rescue_capacity("MDW", "LGA")
-            assert after["seats_out"] < direct["seats_out"] and after["max_passengers"] <= direct["max_passengers"]
+            assert after["seats_leaving_origin"] < direct["seats_leaving_origin"] and after["max_passengers"] <= direct["max_passengers"]
         assert t.rescue_capacity("ZZZ", "BOS")["outcome"] == "unknown_entity"
         assert t.rescue_capacity("DEN", "DEN")["outcome"] == "unknown_entity"
         c = route("How many passengers can we still move from Denver to Boston?", t)["calls"][0]

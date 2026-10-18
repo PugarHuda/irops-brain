@@ -358,7 +358,7 @@ class Tools:
         if total < min(out_s, in_s):
             limit = "the connecting routes in between"
         return self._result("answered" if total else "not_in_graph", rows, start=start, origin=o, dest=d,
-                            hours=int(hours), max_passengers=total, seats_out=out_s, seats_in=in_s, bottleneck=limit)
+                            hours=int(hours), max_passengers=total, seats_leaving_origin=out_s, seats_arriving_dest=in_s, bottleneck=limit)
 
     def _tz(self, code):
         r = self._run("MATCH (a:Airport {code: $c}) RETURN a.tz AS tz", {"c": code})
