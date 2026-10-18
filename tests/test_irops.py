@@ -118,9 +118,20 @@ def llm_answers_are_validated():
 def live_feeds_land_in_the_graph():
     """Real FAA + METAR feeds (network needed): written as nodes linked to airports, read back with the network."""
     from irops import live
+    # FAA flight categories from TAF periods: ceiling = lowest BKN/OVC/OVX layer or vertical visibility
+    assert live._vis("6+") == 6 and live._vis("1 1/2") == 1.5 and live._vis(None) is None
+    assert live.category({"clouds": [{"cover": "OVC", "base": 800}], "visib": "6+"}) == "IFR"
+    assert live.category({"clouds": [{"cover": "FEW", "base": 300}], "visib": "1/2"}) == "LIFR"
+    assert live.category({"clouds": [{"cover": "SCT", "base": 900}], "visib": "6+"}) == "VFR"
+    assert live.category({"clouds": [], "visib": "6+", "vertVis": 400}) == "LIFR"
+    p = {"timeFrom": 100, "timeTo": 200, "clouds": [], "visib": "6+", "wxString": "-FZRA"}
+    assert live.taf_hazards({"fcsts": [p]}, now=150)[0]["what"] == ["freezing precipitation"]
+    assert live.taf_hazards({"fcsts": [p]}, now=250) == []  # already over
     t = Tools()
     feed = live.refresh(t, force=True)
-    assert feed["refreshed"] and feed["metars"] > 50, feed
+    assert feed["refreshed"] and feed["metars"] > 50 and feed["tafs"] > 50, feed
+    fc = t._run("MATCH (l:Live {source: 'TAF'})-[:AT]->(a:Airport) RETURN l.reason AS raw, l.detail AS d, l.starts AS s")
+    assert len(fc) == feed["forecast_hazards"] and all(x["raw"].startswith("TAF") and x["d"] and x["s"] for x in fc), fc
     r = t.live_conditions()
     assert r["outcome"] in ("answered", "not_in_graph") and r["feed"]["faa_time"], r
     assert sum(c["airports"] for c in r["weather_categories"]) == feed["metars"]

@@ -43,8 +43,10 @@ cites the regulation it relies on, and waits for a human to approve it.
    operator resets. Proposals from an older run are superseded and can no longer be approved.
 7. **A second airline, a second graph.** Alaska Airlines' Seattle ice storm (22 Dec 2022) runs on its own graph,
    `irops_AS`, with the same agents. Tenants are isolated by FalkorDB's multi-graph, not by a filter.
-8. **Live now.** The current FAA airport status (ground stops, ground delay programs, delays, closures) and METAR
-   weather for every airport in the network are written into each airline's graph as `(:Live)-[:AT]->(:Airport)`
+8. **Live now.** The current FAA airport status (ground stops, ground delay programs, delays, closures), METAR
+   weather and the TAF forecast for every airport in the network (the next 12 hours, flagged when a period is IFR or
+   LIFR by the FAA ceiling/visibility definition, or forecasts thunderstorms or freezing precipitation, the de-icing
+   trigger behind Elliott) are written into each airline's graph as `(:Live)-[:AT]->(:Airport)`
    nodes (refreshed at most every 5 minutes), then matched against the route network: how many routes and daily
    flights touch each constrained airport, and which spoke airports depend on it.
 9. **Bring your own agent (MCP).** The read-only tool catalogue is also served as an MCP server at `/mcp/`

@@ -100,7 +100,8 @@ def disrupted_bookings(airline: str, limit: int = 20) -> dict:
 @mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, idempotentHint=True, openWorldHint=True))
 def live_conditions(airline: str, airport: str = "") -> dict:
     """Airports in the airline's network constrained RIGHT NOW: FAA ground stops, ground delay programs, delays and
-    closures, plus IFR/LIFR weather from METAR, with routes and daily flights through each. Refreshes the graph's
+    closures, IFR/LIFR weather from METAR, and TAF forecasts of IFR, thunderstorms or freezing precipitation in
+    the next 12 hours, with routes and daily flights through each. Refreshes the graph's
     live layer from the FAA and aviationweather.gov at most every 5 minutes. With `airport`, that airport's current
     METAR and FAA entries even when it is not constrained."""
     from irops import live

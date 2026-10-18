@@ -186,7 +186,7 @@ pre { font: 12px/1.45 var(--code); background: white; border: 1px solid var(--ha
 .live-list .empty { border-color: var(--hair); color: var(--ink-soft); }
 .live-list ul { list-style: none; padding: 0; margin: 4px 0 0; font-size: .9rem; }
 .src { font-weight: 800; font-size: .8rem; padding: 1px 8px; border: 1.5px solid currentColor; border-radius: 999px; }
-.src.FAA { color: var(--pink); } .src.METAR { color: var(--blue); }
+.src.FAA { color: var(--pink); } .src.METAR { color: var(--blue); } .src.TAF { color: var(--ink-soft); border-style: dashed; }
 
 /* mcp */
 .mcp { background: var(--ink); color: var(--panel); }

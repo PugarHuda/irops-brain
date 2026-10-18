@@ -674,7 +674,8 @@ CATALOGUE = {
     "rebook_options": ("k fastest feasible re-routings for a booking (k-shortest paths).",
                        {"booking_id": {"type": "string"}, "k": {"type": "integer"}}, ["booking_id", "k"]),
     "live_conditions": ("Airports in the network constrained RIGHT NOW (FAA ground stops/delay programs/closures, "
-                        "IFR weather from METAR), with routes and daily flights through each. Pass an airport code for that "
+                        "IFR weather from METAR, and TAF forecasts of IFR, thunderstorms or freezing precipitation in the "
+                        "next 12h), with routes and daily flights through each. Pass an airport code for that "
                         "airport's current METAR even when it is not constrained.",
                         {"airport": {"type": "string"}}, []),
     "recall": ("Earlier decisions and lessons about a flight, crew, airport or booking.",
