@@ -172,16 +172,19 @@ def live_feeds_land_in_the_graph():
           [0, "SWA3", "", 0, 0, -104.67, 39.86, 9000, False], [0, "UAL4", "", 0, 0, -104.67, 39.86, 0, True]]
     sky = live.adsb(st, "SWA", [{"code": "DEN", "lat": 39.86, "lon": -104.67}])
     assert sky == {"airborne": 1, "on_ground": 2, "at": {"DEN": 1}}, sky
-    # OpenSky down or rate-limited: the refresh still lands, and the last ADS-B counts stay in the graph
+    # adsb.lol counts the airline's aircraft on the ground at every flagged airport, and only there
+    feed = live.refresh(t, force=True)
+    ground = feed["adsb_ground_at"]
+    flagged = {x["airport"] for x in t.live_conditions()["rows"]}
+    assert set(ground) == flagged and all(isinstance(n, int) for n in ground.values()), (ground, flagged)
+    # OpenSky refused (as it does many cloud IPs): no national totals, no stale ones, the rest of the layer lands
     import httpx
     live._sky.update(t=0.0, states=None)
-    real, live.fetch_opensky = live.fetch_opensky, lambda client: (_ for _ in ()).throw(httpx.HTTPStatusError(
-        "429 Too Many Requests", request=None, response=None))
+    real, live.fetch_opensky = live.fetch_opensky, lambda client: (_ for _ in ()).throw(httpx.ConnectTimeout("timed out"))
     try:
-        before = t.live_conditions()["feed"].get("aircraft_airborne")
         feed = live.refresh(t, force=True)
-        assert feed["refreshed"] and "adsb" in feed["errors"] and "adsb" not in feed, feed
-        assert t.live_conditions()["feed"].get("aircraft_airborne") == before
+        assert feed["refreshed"] and "opensky" in feed["errors"] and "adsb" not in feed, feed
+        assert t.live_conditions()["feed"]["aircraft_airborne"] is None
     finally:
         live.fetch_opensky = real
     # a slow TAF feed costs the forecasts, not the FAA status and METAR fetched alongside it

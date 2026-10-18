@@ -6,8 +6,11 @@ Sources (public, no key):
   aviationweather  https://aviationweather.gov/api/data/metar                 current METAR, flight category
                    https://aviationweather.gov/api/data/taf                   TAF forecast: IFR/LIFR, thunderstorms
                                                                               and freezing precipitation in the next 12h
-  OpenSky Network  https://opensky-network.org/api/states/all               live ADS-B positions: the airline's
-                                                                              aircraft airborne and on the ground now
+  adsb.lol         https://api.adsb.lol/v2/point/{lat}/{lon}/{nm}            live ADS-B around each flagged airport:
+                                                                              the airline's aircraft on the ground there
+  OpenSky Network  https://opensky-network.org/api/states/all               national ADS-B totals, airborne and on the
+                                                                              ground (it refuses many cloud IPs; the totals
+                                                                              appear when it answers)
 
 Each refresh replaces the (:Live) nodes of one graph and links them to the airports they affect, so agents and
 MCP clients read live constraints with the same graph queries as everything else. The flight schedule is the
@@ -37,6 +40,19 @@ OPENSKY_AGE_S = 900
 CALLSIGN = {"WN": "SWA", "AS": "ASA"}  # ICAO airline designators in ADS-B callsigns
 NEAR_DEG = 0.05                         # ~5 km: an aircraft on the ground this close is at the airport
 _sky = {"t": 0.0, "states": None, "time": None}
+ADSBLOL_URL = "https://api.adsb.lol/v2/point/{lat}/{lon}/{nm}"
+GROUND_NM = 3  # nautical miles around the airport reference point
+
+
+def ground_at(client, prefix, airports):
+    """The airline's aircraft reporting on the ground within GROUND_NM of each airport, from adsb.lol."""
+    at = {}
+    for a in airports:
+        r = client.get(ADSBLOL_URL.format(lat=round(a["lat"], 4), lon=round(a["lon"], 4), nm=GROUND_NM), timeout=15)
+        r.raise_for_status()
+        at[a["code"]] = sum(1 for x in r.json().get("ac") or []
+                            if (x.get("flight") or "").strip().startswith(prefix) and x.get("alt_baro") == "ground")
+    return at
 
 
 def fetch_opensky(client):
@@ -165,12 +181,13 @@ def refresh(tools, force=False, lock=None):
             tafs = fetch_taf(client, ids)
         except httpx.HTTPError as e:
             tafs, errors["taf"] = [], f"{type(e).__name__}: {e}"[:120]
+        prefix = CALLSIGN.get(tools.carrier, tools.carrier)
         sky = None
         try:
             states, sky_time = fetch_opensky(client)
-            sky = {**adsb(states, CALLSIGN.get(tools.carrier, tools.carrier), aps), "time": sky_time}
-        except (httpx.HTTPError, ValueError) as e:  # rate-limited or down: keep the last ADS-B counts in the graph
-            errors["adsb"] = f"{type(e).__name__}: {e}"[:120]
+            sky = {**adsb(states, prefix, aps), "time": sky_time}
+        except (httpx.HTTPError, ValueError) as e:  # refused, rate-limited or down: no national totals this round
+            errors["opensky"] = f"{type(e).__name__}: {e}"[:120]
     by_icao = {v: k for k, v in icao.items() if k in set(codes)}
     wx = [{"code": by_icao[m["icaoId"]], "cat": m.get("fltCat") or "", "raw": m.get("rawOb", ""),
            "obs": m.get("reportTime", "")} for m in metar if m.get("icaoId") in by_icao]
@@ -185,13 +202,24 @@ def refresh(tools, force=False, lock=None):
                        "first": hz[0]["from"], "kind": "Forecast " + ", ".join(dict.fromkeys(w for h in hz for w in h["what"])),
                        "detail": "; ".join(f"{', '.join(h['what'])} {z(max(h['from'], now))} to {z(h['to'])} ({h['change']})"
                                            for h in hz[:4])})
+    # the airline's aircraft on the ground at every airport the layer flags, the ones an ops controller looks at
+    flagged = {x["code"] for x in mine} | {x["code"] for x in wx if x["cat"] in CONSTRAINED} | {x["code"] for x in fc}
+    ground = None
+    try:
+        with httpx.Client(timeout=15, headers={"User-Agent": "irops-brain (graph hackathon demo)"}) as client:
+            ground = ground_at(client, prefix, [a for a in aps if a["code"] in flagged and a["lat"] is not None])
+    except (httpx.HTTPError, ValueError) as e:  # down: the rest of the layer still lands, without ground counts
+        errors["adsb"] = f"{type(e).__name__}: {e}"[:120]
     with lock or contextlib.nullcontext():
         out = {**_write(g, mine, wx, faa, faa_time, fc), "tafs": len(tafs), **({"errors": errors} if errors else {})}
-        if sky:
+        if ground is not None:
+            g("MATCH (a:Airport) REMOVE a.adsb_ground", write=True)
             g("UNWIND $rows AS r MATCH (a:Airport {code: r.code}) SET a.adsb_ground = r.n",
-              {"rows": [{"code": c, "n": n} for c, n in sky["at"].items()]}, write=True)
-            g("MATCH (f:LiveFeed {id: 'feed'}) SET f.adsb_airborne = $a, f.adsb_ground = $gr, f.adsb_time = $t",
-              {"a": sky["airborne"], "gr": sky["on_ground"], "t": sky["time"]}, write=True)
+              {"rows": [{"code": c, "n": n} for c, n in ground.items()]}, write=True)
+            out["adsb_ground_at"] = ground
+        g("MATCH (f:LiveFeed {id: 'feed'}) SET f.adsb_airborne = $a, f.adsb_ground = $gr, f.adsb_time = $t",
+          {"a": sky and sky["airborne"], "gr": sky and sky["on_ground"], "t": sky and sky["time"]}, write=True)
+        if sky:
             out["adsb"] = {k: v for k, v in sky.items() if k != "at"}
         return out
 
