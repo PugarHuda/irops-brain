@@ -9,7 +9,7 @@
  },
  {
   "id": "run",
-  "text": "Three agents work the storm. Ops control traces how sixteen late departures spread through aircraft and crew connections, using up the spare minutes at every turn. Fifty more flights go late, seven hundred and forty-one connections break, twenty-one crews are pushed past their legal duty limit, and seven hundred and ninety passengers are now owed a refund under federal rules."
+  "text": "Three agents work the storm. Ops control traces how sixteen late departures spread through aircraft and crew connections, using up the spare minutes at every turn. Fifty more flights go late, seven hundred and forty-one connections break, fifteen crews are pushed past their legal duty limit, and seven hundred and ninety passengers are now owed a refund under federal rules."
  },
  {
   "id": "evidence",
@@ -17,11 +17,11 @@
  },
  {
   "id": "proposals",
-  "text": "Crew scheduling finds reserve crews. When none is on call at the airport, it runs A-star over the route network to find the nearest base that has one, and claims that reserve atomically, so two agents can never take the same pilot. Every proposal cites the regulation it relies on."
+  "text": "Crew scheduling finds reserve crews. When none is on call at the airport, it runs A-star over the route network to find the nearest base that has one, and claims that reserve atomically, so two agents can never take the same pilot. A reserve only takes the legs it can fly legally; what is left goes back to ops. Every proposal cites the regulation it relies on."
  },
  {
   "id": "approve",
-  "text": "Nothing changes until a human approves. On approval, the change is written to the graph, then read back as proof. Reject a proposal, and the agents remember: on the next run, that exact action is withheld."
+  "text": "Nothing changes until a human approves. On approval, the change is written to the graph, read back as proof, and the impact is projected again: one crew fewer over its limit. Reject a proposal, and the agents remember: on the next run, that exact action is withheld."
  },
  {
   "id": "trace",
@@ -37,7 +37,7 @@
  },
  {
   "id": "live",
-  "text": "The same graph takes in live FAA airport status and weather. A second airline, Alaska, runs on its own isolated graph. And every tool is also an MCP server, so you can plug your own agent straight into it."
+  "text": "The same graph takes in live FAA airport status and weather. A second airline, Alaska, runs on its own isolated graph. And every tool is also an MCP server, with the decision log and a briefing prompt, so you can plug your own agent straight into it."
  },
  {
   "id": "outro",

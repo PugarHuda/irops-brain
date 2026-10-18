@@ -134,7 +134,11 @@ await scene("approve", async (cut) => {
   const reserve = page.locator("#strips .strip", { hasText: "Assign reserve" }).first();
   await point(reserve.locator("button.approve"));
   await page.waitForSelector("#strips .stamp.approved", { timeout: 60000 });
-  await sleep(2200);
+  await sleep(1200);
+  await cut(() => page.waitForSelector("#impact .delta", { timeout: 60000 }));
+  await glide("#impact", { offset: 320, ms: 1200 });   // the impact, projected again on the changed graph
+  await sleep(2600);
+  await glide(".board", { ms: 1000 });
   const cancel = page.locator("#strips .strip:not(.done)", { hasText: "Cancel round trip" }).first();
   await cancel.scrollIntoViewIfNeeded();
   await point(cancel.getByRole("button", { name: "Reject" }));

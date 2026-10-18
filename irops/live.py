@@ -9,6 +9,7 @@ Each refresh replaces the (:Live) nodes of one graph and links them to the airpo
 MCP clients read live constraints with the same graph queries as everything else. The flight schedule is the
 December 2022 replay; the live layer shows how today's constraints would land on that network.
 """
+import contextlib
 import csv
 import time
 
@@ -58,8 +59,9 @@ def fetch_metar(client, icaos):
     return rows
 
 
-def refresh(tools, force=False):
-    """Pull both feeds and rewrite this graph's live layer. Cached for MAX_AGE_S."""
+def refresh(tools, force=False, lock=None):
+    """Pull both feeds and rewrite this graph's live layer. Cached for MAX_AGE_S. `lock` (a context manager) is held
+    only while writing, not during the network fetch, so a slow FAA response never blocks an agent run."""
     g = tools._run
     last = g("MATCH (f:LiveFeed {id: 'feed'}) RETURN f.fetched AS t")
     if last and not force and time.time() - last[0]["t"] < MAX_AGE_S:
@@ -73,6 +75,11 @@ def refresh(tools, force=False):
     wx = [{"code": by_icao[m["icaoId"]], "cat": m.get("fltCat") or "", "raw": m.get("rawOb", ""),
            "obs": m.get("reportTime", "")} for m in metar if m.get("icaoId") in by_icao]
     mine = [x for x in faa if x["code"] in set(codes)]
+    with lock or contextlib.nullcontext():
+        return _write(g, mine, wx, faa, faa_time)
+
+
+def _write(g, mine, wx, faa, faa_time):
     g("MATCH (l:Live) DETACH DELETE l", write=True)
     g("""UNWIND $rows AS r MATCH (a:Airport {code: r.code})
          CREATE (l:Live {source: 'FAA', kind: r.kind, reason: r.reason, detail: r.detail, as_of: $t})-[:AT]->(a)""",

@@ -199,6 +199,7 @@ def refunds_and_rejections_are_remembered():
     fresh = next(x for x in agents.run("den-elliott")["proposals"] if x["action"] == p["action"])
     assert fresh["status"] == "proposed", fresh
     t.reset_ops()
+    t._run("MATCH (d:Decision {session: 't'}) DETACH DELETE d", write=True)  # keep the public decision log clean
     assert snapshot(t) == before
 
 

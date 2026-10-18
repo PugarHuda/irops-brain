@@ -26,7 +26,7 @@ WRITE = threading.Lock()
 def writing(wait_s):
     """Hold the write lock, or tell the caller plainly that someone else's run is in progress."""
     if not WRITE.acquire(timeout=wait_s):
-        raise HTTPException(429, "Another visitor's agents are working on the graph. Try again in a few seconds.")
+        raise HTTPException(429, "Another visitor's change is being written to the graph. Try again in a few seconds.")
     try:
         yield
     finally:
@@ -103,7 +103,7 @@ def scenarios():
 def run(body: Run):
     if body.scenario not in SCENARIOS:
         raise HTTPException(404, "unknown scenario")
-    with writing(5):
+    with writing(20):  # another run takes ~10-20 s; wait it out rather than fail the click
         ensure_graphs()  # the database may have restarted (and come back empty) since this process started
         return agents.run(body.scenario)
 
@@ -133,8 +133,7 @@ def live_now(tenant: str = "irops_WN"):
     """FAA airport status + METAR, refreshed into this airline's graph (cached 5 min), read back with the network."""
     t = Tools(tenant_of(tenant))
     try:
-        with writing(10):
-            feed = live.refresh(t)
+        feed = live.refresh(t, lock=writing(10))
     except HTTPException:
         raise
     except Exception as e:  # FAA or aviationweather unreachable: show the last layer in the graph, and say so
