@@ -280,9 +280,10 @@ class Tools:
         cut_off = [a for c in comps[1:] for a in c["airports"]]
         return self._result("answered", stats, start=start, components=len(comps), cut_off_airports=cut_off)
 
-    def rebook_options(self, booking_id, k=3):
+    def rebook_options(self, booking_id, k=3, held=None):
         """k-shortest feasible itineraries for a disrupted booking, via algo.SPpaths over the
-        time-expanded connection network. Seats, cancellations and projected delays are checked."""
+        time-expanded connection network. Seats, cancellations and projected delays are checked.
+        `held` maps flight id -> seats already promised to other proposals of the same run."""
         start = len(self.trace)
         b = self._run("""
             MATCH (b:Booking {id: $id})-[s:SEGMENT]->(f:Flight)
@@ -299,14 +300,14 @@ class Tools:
             at, ready = last["f_origin"], first["arr"] + first["delay"] + MIN_PAX_CONN
         rows = self._run("""
             MATCH (s:Flight:Active)-[:DEPARTS_FROM]->(:Airport {code: $at})
-            WHERE s.dep + s.delay >= $ready AND s.seats - s.pax >= $pax AND NOT s.id IN $current
+            WHERE s.dep + s.delay >= $ready AND s.seats - s.pax - coalesce($held[s.id], 0) >= $pax AND NOT s.id IN $current
             WITH s ORDER BY CASE WHEN s.dest = $dest THEN 0 ELSE 1 END, s.dep LIMIT 16
             MATCH (t:Airport {code: $dest})
             CALL algo.SPpaths({sourceNode: s, targetNode: t, relTypes: ['CONN', 'ARRIVES_AT'],
                                weightProp: 'w', maxLen: 3, pathCount: 4})
             YIELD path, pathWeight
             WITH path, pathWeight, [n IN nodes(path) WHERE n:Flight] AS fl
-            WHERE all(n IN fl WHERE n:Active AND n.seats - n.pax >= $pax)
+            WHERE all(n IN fl WHERE n:Active AND n.seats - n.pax - coalesce($held[n.id], 0) >= $pax)
               AND all(i IN range(0, size(fl) - 2) WHERE fl[i].arr + fl[i].delay + $mct <= fl[i + 1].dep + fl[i + 1].delay)
             WITH path, fl, fl[size(fl) - 1] AS l
             RETURN [n IN fl | n.id] AS flights, size(fl) - 1 AS connections,
@@ -314,7 +315,7 @@ class Tools:
             ORDER BY arrives, connections LIMIT $k""",
                          {"at": at, "dest": dest, "ready": int(ready), "pax": pax, "mct": MIN_PAX_CONN,
                           "planned": first["planned_arr"], "k": int(k),
-                          "current": [x["flight"] for x in b]})
+                          "current": [x["flight"] for x in b], "held": dict(held or {})})
         for r in rows:
             r["arrives_local"] = hhmm(r["arrives"], self._tz(dest))
         paths = [r.pop("path") for r in rows]

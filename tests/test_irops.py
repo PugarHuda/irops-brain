@@ -66,6 +66,7 @@ def main():
     approvals_are_atomic_verified_and_reversible()
     refunds_and_rejections_are_remembered()
     refunds_say_why_rebooking_fails()
+    rebooks_never_share_the_last_seats()
     other_airline_is_isolated()
     names_and_constraints()
     crews_over_limit_agree_with_propagation()
@@ -311,7 +312,7 @@ def refunds_say_why_rebooking_fails():
     route is out of seats or only no connection works in time. Only the k-shortest-path search is stubbed out."""
     from irops import agents
     real = Tools.rebook_options
-    Tools.rebook_options = lambda self, booking_id, k=3: self._result("not_in_graph")
+    Tools.rebook_options = lambda self, booking_id, k=3, held=None: self._result("not_in_graph")
     try:
         out = agents.run("den-elliott")
     finally:
@@ -321,6 +322,29 @@ def refunds_say_why_rebooking_fails():
     assert refunds and all("max flow" in p["summary"] and "14 CFR 260.6" in p["summary"] for p in refunds), refunds
     flows = [s for s in out["steps"] if s["agent"] == "pax" and s["tool"] == "rescue_capacity"]
     assert len(flows) >= len(out["capacity"]), flows  # one per busiest route, plus the refunds' own routes
+
+
+def rebooks_never_share_the_last_seats():
+    """Midway: several broken itineraries want the same flight. The proposals of one run fit its free seats
+    together, so every one of them can be approved (found by a user approving them one by one)."""
+    from irops import agents
+    t = Tools()
+    t.reset_ops()
+    try:
+        out = agents.run("mdw-elliott")
+        rebooks = [p for p in out["proposals"] if p["kind"] == "rebook" and p["status"] == "proposed"]
+        want = {}
+        for p in rebooks:
+            act = json.loads(p["action"])
+            pax = t._run("MATCH (b:Booking {id: $b}) RETURN b.pax AS n", {"b": act["booking"]})[0]["n"]
+            for f in act["flights"]:
+                want[f] = want.get(f, 0) + pax
+        for f, n in want.items():
+            free = t._run("MATCH (f:Flight {id: $f}) RETURN f.seats - f.pax AS free", {"f": f})[0]["free"]
+            assert n <= free, (f, n, free)
+        assert rebooks and all(agents.approve(p["id"])["ok"] for p in rebooks)
+    finally:
+        t.reset_ops()
 
 
 def other_airline_is_isolated():

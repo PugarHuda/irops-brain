@@ -167,12 +167,14 @@ def pax_agent(s: Session):
         capacity(o, d, f"{n} pax on broken {o}->{d} itineraries: can the rest of the network still carry them?")
     s.capacity = [{"origin": o, "dest": d, "stranded": demand[(o, d)], "max_passengers": r.get("max_passengers", 0),
                    "bottleneck": r.get("bottleneck")} for (o, d), r in cap.items() if (o, d) in demand]
-    done = 0
+    done, held = 0, {}  # seats this run's earlier rebook proposals already promised, so two never share the last seats
     for b in broken["rows"][:MAX_PROPOSALS]:
         opt = s.call(a, "rebook_options", f"{b['pax']} pax {b['origin']}->{b['dest']}: {b['reason']}",
-                     booking_id=b["booking"], k=3)
+                     booking_id=b["booking"], k=3, held=dict(held))
         if opt["rows"]:
             best = opt["rows"][0]
+            for f in best["flights"]:
+                held[f] = held.get(f, 0) + b["pax"]
             t.remember(a, "rebook", f"Rebook {b['booking']} ({b['pax']} pax {b['origin']}->{b['dest']}) via "
                        f"{' + '.join(best['flights'])}, arriving {best['arrives_local']} ({best['late_by']} min late).",
                        [b["booking"]] + best["flights"], evidence=opt["paths"][0], session=s.id,
