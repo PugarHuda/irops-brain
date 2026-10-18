@@ -14,7 +14,7 @@ cites the regulation it relies on, and waits for a human to approve it.
 
 **Tracks:** 01 Agents That Act on Connected Data (primary) · 02 Agent Memory and Coordination · 03 Company Brain
 
-- Demo video: _add link_
+- Demo video: https://youtu.be/Ta5wwLPcX7Y
 - Live: https://irops-brain.vercel.app (static UI on Vercel; `/api` and `/mcp` are proxied to the FastAPI + FalkorDB backend at https://irops-brain.onrender.com, which on the free tier takes ~1 min to wake after idle)
 
 ## What it does
