@@ -43,6 +43,10 @@ against the graph before the query runs. That idea came from the WeMakeDevs post
   cancellations and projected delays are checked inside the query. A booking with no feasible re-routing gets a
   refund proposal under 14 CFR 260.6, and the impact panel counts every passenger owed one: last leg 3h+ late, or a
   leg cancelled.
+  To know whether rebooking can work at all, it asks `algo.maxFlow`: with each route's free seats on flights still to
+  depart as its capacity, how many passengers can the rest of the network still carry from Denver to Boston today?
+  The answer is 499, and the limit is seats arriving at Boston, not seats leaving Denver. Connection times are not
+  checked, so it is an upper bound: anyone stranded beyond it can only be refunded.
 
 Every proposal cites a rule node and waits for a human to approve it. Decisions, handoffs and lessons are stored as
 nodes too. So when you run the scenario again, the agents remember what happened at Denver last time, and if a
@@ -101,6 +105,8 @@ lessons as resources, and a `disruption_briefing` prompt that walks your agent t
 - On the 100 MB free cloud tier, `algo.betweenness` with 256 samples ran out of memory and took the graph with it.
   64 samples fits, and the app now rebuilds the graph if it ever comes back empty.
 - We pinned v4.22.1 because A\* has not been ported to 6.x yet.
+
+Watch the demo: https://youtu.be/Ta5wwLPcX7Y
 
 Try it at https://irops-brain.vercel.app. The code, the data pipeline, the backtest and the demo video's source
 (an edge-tts voice-over, a Playwright recording of the live app and a Remotion composition) are on GitHub:
