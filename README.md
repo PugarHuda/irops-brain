@@ -32,6 +32,9 @@ cites the regulation it relies on, and waits for a human to approve it.
    and projected delays checked inside the query). A booking with no feasible re-routing gets an executable
    **refund** proposal (14 CFR 260.6); approving it releases the seats. The impact panel counts the passengers owed a
    refund if they ask: last leg projected 3h+ late, or a leg cancelled.
+   It also sizes the problem: for the routes with the most stranded passengers it runs a **max flow** over free
+   seats (`rescue_capacity`) and the briefing says how many the rest of the network can still carry; a refund
+   proposal says whether the route is out of seats altogether or only no connection works in time.
 5. **You approve or reject** each proposal. Approval is atomic (a double click or a second operator cannot run it
    twice), writes to the graph, then reads the graph back and is only stamped APPROVED if the read-back shows the
    intended state. The impact panel is then re-projected on the changed graph and shows what your approvals moved

@@ -151,7 +151,22 @@ def pax_agent(s: Session):
     work = s.call(a, "inbox", "misconnects handed over by ops", agent=a, session=s.id)
     for h in work["rows"]:
         t.close_handoff(h["handoff"])
-    broken = s.call(a, "disrupted_bookings", "itineraries broken by cancellations or impossible connections", limit=12)
+    broken = s.call(a, "disrupted_bookings", "itineraries broken by cancellations or impossible connections", limit=200)
+    # how many stranded passengers the network can still carry at all, for the routes with the most of them
+    demand = {}
+    for b in broken["rows"]:
+        demand[(b["origin"], b["dest"])] = demand.get((b["origin"], b["dest"]), 0) + b["pax"]
+    cap = {}
+
+    def capacity(o, d, note):
+        if (o, d) not in cap:
+            cap[(o, d)] = s.call(a, "rescue_capacity", note, origin=o, dest=d)
+        return cap[(o, d)]
+
+    for (o, d), n in sorted(demand.items(), key=lambda x: -x[1])[:3]:
+        capacity(o, d, f"{n} pax on broken {o}->{d} itineraries: can the rest of the network still carry them?")
+    s.capacity = [{"origin": o, "dest": d, "stranded": demand[(o, d)], "max_passengers": r.get("max_passengers", 0),
+                   "bottleneck": r.get("bottleneck")} for (o, d), r in cap.items() if (o, d) in demand]
     done = 0
     for b in broken["rows"][:MAX_PROPOSALS]:
         opt = s.call(a, "rebook_options", f"{b['pax']} pax {b['origin']}->{b['dest']}: {b['reason']}",
@@ -163,8 +178,15 @@ def pax_agent(s: Session):
                        [b["booking"]] + best["flights"], evidence=opt["paths"][0], session=s.id,
                        action={"op": "apply_rebook", "booking": b["booking"], "flights": best["flights"]})
         else:
+            at = opt.get("booking", {}).get("stranded_at") or b["origin"]
+            r = capacity(at, b["dest"], f"no re-routing for {b['booking']}: is {at}->{b['dest']} out of seats altogether?")                 if at != b["dest"] else {}
+            m = r.get("max_passengers", 0)
+            why = (f"The whole network has no free seat from {at} to {b['dest']} in the next 24h (max flow 0)."
+                   if r.get("outcome") in ("answered", "not_in_graph") and not m else
+                   f"The network still has room for at most {m} more {at}->{b['dest']} in 24h (max flow, limited by "
+                   f"{r.get('bottleneck')}), but no connection with {b['pax']} seats together works in time." if m else "")
             t.remember(a, "refund", f"No feasible re-routing for {b['booking']} ({b['pax']} pax {b['origin']}->{b['dest']}, "
-                       f"{b['reason']}) today. Refund it, as 14 CFR 260.6 requires, and put its seats back on sale.",
+                       f"{b['reason']}) today. {why} Refund it, as 14 CFR 260.6 requires, and put its seats back on sale.",
                        [b["booking"]], ["DOT-REFUND-2024"], session=s.id, action={"op": "refund", "booking": b["booking"]})
         done += 1
     return done
@@ -198,10 +220,11 @@ def run(scenario="den-elliott", tenant=None):
                 f"{used} reserves claimed." + (" Pre-position reserves from the nearest A* bases early next time." if used else ""),
                 [ap], s.id)
     proposals = t.decisions(session=s.id)
-    briefing = brief(sc, summ, proposals, ops["lessons"])
+    briefing = brief(sc, summ, proposals, ops["lessons"], getattr(s, "capacity", []))
     return {"session": s.id, "tenant": t.tenant, "scenario": {k: v for k, v in sc.items() if k not in ("roots", "cancelled")},
             "known": {"delayed": len(sc["roots"]), "cancelled": len(sc["cancelled"])},
             "summary": summ, "lessons_recalled": ops["lessons"], "steps": s.steps, "proposals": proposals,
+            "capacity": getattr(s, "capacity", []),
             "briefing": briefing}
 
 
@@ -255,7 +278,7 @@ def reject(decision_id, tenant="irops_WN"):
 
 
 # -- briefing from the graph numbers ---------------------
-def brief(sc, summ, proposals, lessons):
+def brief(sc, summ, proposals, lessons, capacity=()):
     # ponytail: built from the graph numbers, not by an LLM. An LLM draft cost 10-30 s inside the write lock and
     # most of the free OpenRouter quota, and the number check rejected half the drafts. The LLM answers questions.
     kinds = {}
@@ -271,6 +294,11 @@ def brief(sc, summ, proposals, lessons):
     if kinds:
         lines.append("Proposed: " + ", ".join(f"{v} x {k.replace('_', ' ')}" for k, v in kinds.items()) +
                      ". Each proposal carries the graph path behind it and waits for approval.")
+    if capacity:
+        lines.append("Rebooking room (max flow over free seats, next 24h): " + "; ".join(
+            f"{c['stranded']} pax stranded {c['origin']}->{c['dest']}, the network can carry at most {c['max_passengers']}"
+            + (" (fewer than stranded: the rest can only be refunded)" if c["max_passengers"] < c["stranded"] else "")
+            for c in capacity) + ".")
     held = sum(p["status"] == "withheld" for p in proposals)
     if held:
         lines.append(f"{held} action(s) a human already rejected were not proposed again.")

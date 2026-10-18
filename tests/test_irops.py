@@ -202,6 +202,11 @@ def approvals_are_atomic_verified_and_reversible():
         if p["action"]:
             by_kind.setdefault(p["kind"], p)
     assert {"assign_reserve", "cancel_round_trip", "rebook", "publish_delays"} <= set(by_kind), set(by_kind)
+    # the passenger agent sizes the stranded passengers against what the network can still carry (max flow)
+    cap = out["capacity"]
+    assert cap and all(c["stranded"] > 0 and c["max_passengers"] >= 0 for c in cap), cap
+    assert any(s["agent"] == "pax" and s["tool"] == "rescue_capacity" for s in out["steps"])
+    assert "Rebooking room" in out["briefing"]["text"], out["briefing"]
     for kind in ("assign_reserve", "cancel_round_trip", "rebook", "publish_delays"):
         r = agents.approve(by_kind[kind]["id"])
         assert r["ok"] and r["verification"]["outcome"] == "answered", (kind, r)
