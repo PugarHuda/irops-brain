@@ -65,6 +65,8 @@ const cy = cytoscape({
   ],
 });
 
+const ordinal = (n) => n + (["th", "st", "nd", "rd"][(n % 100 - 20) % 10] || ["th", "st", "nd", "rd"][n % 100] || "th");
+
 function edgeLabel(e) {
   if (e.type === "NEXT_LEG") return `aircraft ${e.tail || ""} · slack ${e.slack}m`;
   if (e.type === "CREW_NEXT") return `crew ${e.crew} · slack ${e.slack}m`;
@@ -146,7 +148,8 @@ async function loadLive() {
         + `TAF forecasts flag ${r.rows.filter((x) => x.live.some((l) => l.source === "TAF")).length} of them for the next 12 hours.`;
     if (!r.rows.length) { list.replaceChildren(el("li", { class: "empty" }, "Nothing in this network is constrained right now.")); return; }
     list.replaceChildren(...r.rows.map((x) => el("li", {},
-      el("b", {}, x.airport), ` ${x.name || ""} · ${fmt(x.routes)} routes, ${fmt(x.daily_flights)} flights a day touch it`,
+      el("b", {}, x.airport), ` ${x.name || ""} · ${fmt(x.routes)} routes, ${fmt(x.daily_flights)} flights a day touch it`
+        + (x.network_rank ? `, ${fmt(x.connecting_pax_per_day)} passengers a day connect here, ${ordinal(x.network_rank)} most central of ${x.airports_ranked} (PageRank)` : ""),
       x.spokes_mostly_served_from_here.length ? ` · mostly serves ${x.spokes_mostly_served_from_here.join(", ")}` : "",
       el("ul", {}, x.live.map((l) => el("li", {}, el("span", { class: `src ${l.source}` }, l.source), ` ${l.kind}: `,
         el("code", {}, l.reason), l.detail ? ` (${l.detail})` : ""))))));

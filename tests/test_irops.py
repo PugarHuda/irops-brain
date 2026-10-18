@@ -146,6 +146,10 @@ def live_feeds_land_in_the_graph():
     # one airport on request, constrained or not, by code or by name
     sea = t.live_conditions("SEA")["rows"]
     assert len(sea) == 1 and sea[0]["airport"] == "SEA" and sea[0]["metar"].startswith(("METAR", "SPECI")), sea
+    # PageRank over routes ranks the hub first; connecting passengers come from the PAX_CONNECT edges
+    den = t.live_conditions("DEN")["rows"][0]
+    assert den["network_rank"] == 1 and den["airports_ranked"] > 50 and den["connecting_pax_per_day"] > 1000, den
+    assert 1 < sea[0]["network_rank"] <= sea[0]["airports_ranked"] and sea[0]["connecting_pax_per_day"] >= 0, sea
     assert t.live_conditions("ZZZ")["outcome"] == "unknown_entity"
     assert route("What is the weather in Seattle right now?", t)["calls"][0]["args"]["airport"] == "SEA"
     # the endpoint keeps serving the stored layer, and says why, while a run writes or the FAA is down

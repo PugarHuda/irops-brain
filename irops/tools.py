@@ -629,6 +629,18 @@ class Tools:
             RETURN a.code AS airport, a.name AS name, a.wx_cat AS flight_category, a.wx_raw AS metar,
                    a.wx_at AS observed, routes, daily_flights, dependent AS spokes_mostly_served_from_here, live
             ORDER BY daily_flights DESC""", {"ap": ap})
+        if rows:  # how central each airport is (PageRank over routes) and how many passengers connect there
+            rank = {r["code"]: i + 1 for i, r in enumerate(self._run(
+                "CALL algo.pageRank('Airport', 'ROUTE') YIELD node, score RETURN node.code AS code ORDER BY score DESC"))}
+            codes = [r["airport"] for r in rows]
+            conn = {r["code"]: r["pax"] for r in self._run("""
+                MATCH (f:Flight) WITH count(DISTINCT f.date) AS days
+                MATCH (x:Flight)-[c:PAX_CONNECT]->(:Flight) WHERE x.dest IN $c
+                WITH x.dest AS code, days, sum(c.pax) AS total
+                RETURN code, toInteger(total / days) AS pax""", {"c": codes})}
+            for r in rows:
+                r["network_rank"], r["airports_ranked"] = rank.get(r["airport"]), len(rank)
+                r["connecting_pax_per_day"] = int(conn.get(r["airport"]) or 0)
         wx = self._run("""MATCH (a:Airport) WHERE a.wx_cat IS NOT NULL
             RETURN a.wx_cat AS cat, count(*) AS airports ORDER BY airports DESC""")
         return self._result("answered" if rows else "not_in_graph", rows, start=start, feed=feed[0],

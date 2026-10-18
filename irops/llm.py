@@ -267,7 +267,8 @@ def _say(tool, r):
         if len(rows) == 1 and not rows[0]["live"]:
             x = rows[0]
             return f"{x['airport']} right now: {x['flight_category'] or 'no flight category'}, not constrained. {x['metar'] or ''}"
-        bits = [f"{x['airport']} ({'; '.join(l['kind'] for l in x['live'])}; {int(x['daily_flights'] or 0)} flights/day touch it)"
+        bits = [f"{x['airport']} ({'; '.join(l['kind'] for l in x['live'])}; {int(x['daily_flights'] or 0)} flights/day touch it, "
+                f"{x.get('connecting_pax_per_day', 0)} pax/day connect there)"
                 for x in rows[:5]]
         return f"Right now (FAA {f.get('faa_time', '?')}): " + ", ".join(bits) + "."
     if tool == "rescue_capacity":

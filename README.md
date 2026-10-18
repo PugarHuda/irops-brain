@@ -51,7 +51,8 @@ cites the regulation it relies on, and waits for a human to approve it.
    LIFR by the FAA ceiling/visibility definition, or forecasts thunderstorms or freezing precipitation, the de-icing
    trigger behind Elliott) are written into each airline's graph as `(:Live)-[:AT]->(:Airport)`
    nodes (refreshed at most every 5 minutes), then matched against the route network: how many routes and daily
-   flights touch each constrained airport, and which spoke airports depend on it.
+   flights touch each constrained airport, how many passengers connect there a day (from the `PAX_CONNECT`
+   edges), how central it is (`algo.pageRank` over the route network), and which spoke airports depend on it.
 9. **Bring your own agent (MCP).** The read-only tool catalogue is also served as an MCP server at `/mcp/`
    (streamable HTTP) and over stdio: `claude mcp add --transport http irops-brain https://irops-brain.vercel.app/mcp/`.
    Besides the tools (including `crews_over_limit`, which projects the delays now in the graph onto every crew's
