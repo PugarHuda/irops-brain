@@ -35,7 +35,11 @@ const fmt = (n) => Number(n || 0).toLocaleString("en-US");
 async function api(path, body) {
   const r = await fetch(path, body === undefined ? {} : {
     method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || r.statusText);
+  if (!r.ok) {  // FastAPI sends {detail}; a proxy or a crash may send nothing useful, so say at least the status
+    const d = (await r.json().catch(() => ({}))).detail;
+    throw new Error(typeof d === "string" ? d : r.status >= 502 ? `the backend did not answer (HTTP ${r.status}); it may be waking up, try again in a minute`
+      : `HTTP ${r.status}${r.statusText ? " " + r.statusText : ""}`);
+  }
   return r.json();
 }
 
@@ -208,7 +212,7 @@ async function run() {
   } catch (e) {
     $("briefing").hidden = false;
     $("briefing").textContent = /Another visitor/.test(e.message) ? e.message
-      : `The run failed: ${e.message}. Check that FalkorDB is running and the graph is loaded (uv run python -m irops.ingest).`;
+      : `The run failed: ${e.message}. Press Run the agents to try again: every run starts again from a clean replay.`;
   } finally {
     btn.disabled = false; btn.textContent = "Run the agents again";
   }

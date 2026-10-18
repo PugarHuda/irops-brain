@@ -4,8 +4,9 @@ import json
 import threading
 from pathlib import Path
 
+import redis
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import BaseModel, Field
@@ -59,6 +60,16 @@ async def lifespan(_app):
 
 
 app = FastAPI(title="IROPS Brain", lifespan=lifespan)
+
+
+@app.exception_handler(redis.exceptions.RedisError)
+def graph_error(_req, e):
+    """FalkorDB timed out, dropped the connection or refused a query: tell the visitor in JSON, not a bare 500."""
+    slow = isinstance(e, redis.exceptions.TimeoutError) or "timed out" in str(e).lower()
+    return JSONResponse(status_code=503, content={"detail": "the graph database took too long to answer, likely busy with "
+                        "another run" if slow else f"the graph database refused the request ({type(e).__name__})"})
+
+
 app.mount("/static", StaticFiles(directory=ROOT / "web"), name="static")
 app.mount("/mcp", mcp_app)
 

@@ -161,6 +161,15 @@ def live_feeds_land_in_the_graph():
     finally:
         live.fetch_faa = real
     assert c.get("/api/live").json()["feed"]["refreshed"]
+    # a FalkorDB timeout reaches the browser as a JSON 503 it can explain, not a bare 500
+    import redis
+    real_run = api.agents.run
+    api.agents.run = lambda name: (_ for _ in ()).throw(redis.exceptions.ResponseError("Query timed out"))
+    try:
+        r = c.post("/api/run", json={"scenario": "den-elliott"})
+        assert r.status_code == 503 and "too long" in r.json()["detail"], r.text
+    finally:
+        api.agents.run = real_run
 
 
 def snapshot(t):
