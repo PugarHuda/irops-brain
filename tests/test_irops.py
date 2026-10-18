@@ -176,7 +176,8 @@ def live_feeds_land_in_the_graph():
     feed = live.refresh(t, force=True)
     ground = feed["adsb_ground_at"]
     flagged = {x["airport"] for x in t.live_conditions()["rows"]}
-    assert set(ground) == flagged and all(isinstance(n, int) for n in ground.values()), (ground, flagged)
+    assert ground and set(ground) <= flagged and all(isinstance(n, int) for n in ground.values()), (ground, flagged)
+    assert live.refresh(t, force=True)["adsb_ground_at"] == ground  # cached: no second round of requests
     # OpenSky refused (as it does many cloud IPs): no national totals, no stale ones, the rest of the layer lands
     import httpx
     live._sky.update(t=0.0, states=None)

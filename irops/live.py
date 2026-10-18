@@ -44,14 +44,30 @@ ADSBLOL_URL = "https://api.adsb.lol/v2/point/{lat}/{lon}/{nm}"
 GROUND_NM = 3  # nautical miles around the airport reference point
 
 
+_ground = {}  # (callsign prefix, airport) -> (fetched, count), shared by every graph in this process
+
+
 def ground_at(client, prefix, airports):
-    """The airline's aircraft reporting on the ground within GROUND_NM of each airport, from adsb.lol."""
-    at = {}
+    """The airline's aircraft reporting on the ground within GROUND_NM of each airport, from adsb.lol. Requests are
+    spaced and cached for MAX_AGE_S; if adsb.lol rate-limits, the airports counted so far are returned and the
+    rest get no count rather than a guess."""
+    at, calls = {}, 0
     for a in airports:
+        hit = _ground.get((prefix, a["code"]))
+        if hit and time.time() - hit[0] < MAX_AGE_S:
+            at[a["code"]] = hit[1]
+            continue
+        if calls:
+            time.sleep(0.5)  # ponytail: spaced to stay inside adsb.lol fair use; a 429 just ends the round early
+        calls += 1
         r = client.get(ADSBLOL_URL.format(lat=round(a["lat"], 4), lon=round(a["lon"], 4), nm=GROUND_NM), timeout=15)
+        if r.status_code == 429:
+            break
         r.raise_for_status()
-        at[a["code"]] = sum(1 for x in r.json().get("ac") or []
-                            if (x.get("flight") or "").strip().startswith(prefix) and x.get("alt_baro") == "ground")
+        n = sum(1 for x in r.json().get("ac") or []
+                if (x.get("flight") or "").strip().startswith(prefix) and x.get("alt_baro") == "ground")
+        at[a["code"]] = n
+        _ground[(prefix, a["code"])] = (time.time(), n)
     return at
 
 
