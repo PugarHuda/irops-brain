@@ -334,7 +334,7 @@ def rescue_capacity_is_a_max_flow():
         assert r["outcome"] == "answered" and 0 < r["max_passengers"] <= min(r["seats_leaving_origin"], r["seats_arriving_dest"]), r
         assert all(x["to"] == "BOS" for x in r["rows"])
         assert len(r["paths"]) == len(r["rows"]) and all(p["edges"][0]["dst"] == "BOS" for p in r["paths"])
-        assert sum(x["flow"] for x in r["rows"]) == r["max_passengers"]  # everything that reaches the sink
+        assert sum(x["last_leg_pax"] for x in r["rows"]) == r["max_passengers"]  # everything that reaches the sink
         assert r["bottleneck"] in ("seats out of DEN", "seats into BOS", "the connecting routes in between")
         direct = t.rescue_capacity("MDW", "LGA")
         f = t._run("""MATCH (:Airport {code: 'MDW'})<-[:DEPARTS_FROM]-(f:Flight:Active)-[:ARRIVES_AT]->(:Airport {code: 'LGA'})

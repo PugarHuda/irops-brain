@@ -351,8 +351,9 @@ class Tools:
             OPTIONAL MATCH (s)-[a:ROUTE]->() WITH t, sum(a.free) AS out_seats
             OPTIONAL MATCH ()-[b:ROUTE]->(t) RETURN out_seats, sum(b.free) AS in_seats""", {"o": o, "d": d})[0]
         total = int(rows[0]["maxFlow"]) if rows else 0
-        for r in rows:
+        for r in rows:  # named so a model reading the rows does not take one leg for the answer
             r.pop("maxFlow")
+            r["last_leg_pax"] = int(r.pop("flow"))
         out_s, in_s = int(ends["out_seats"] or 0), int(ends["in_seats"] or 0)
         limit = "seats out of " + o if out_s <= in_s else "seats into " + d
         if total < min(out_s, in_s):
@@ -360,8 +361,10 @@ class Tools:
         # each last leg that carries flow, as a one-edge path the evidence canvas can draw
         paths = [{"nodes": [{"key": r["from"], "label": "Airport", "code": r["from"]},
                             {"key": d, "label": "Airport", "code": d}],
-                  "edges": [{"type": "ROUTE", "src": r["from"], "dst": d, "flow": int(r["flow"])}]} for r in rows]
+                  "edges": [{"type": "ROUTE", "src": r["from"], "dst": d, "flow": r["last_leg_pax"]}]} for r in rows]
         return self._result("answered" if total else "not_in_graph", rows, paths, start=start, origin=o, dest=d,
+                            answer=f"At most {total} passengers in total can still get from {o} to {d} in the next "
+                                   f"{int(hours)}h; the rows split that total over the last legs into {d}.",
                             hours=int(hours), max_passengers=total, seats_leaving_origin=out_s, seats_arriving_dest=in_s, bottleneck=limit)
 
     def _tz(self, code):

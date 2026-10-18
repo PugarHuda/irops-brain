@@ -271,7 +271,7 @@ def _say(tool, r):
                 for x in rows[:5]]
         return f"Right now (FAA {f.get('faa_time', '?')}): " + ", ".join(bits) + "."
     if tool == "rescue_capacity":
-        legs = ", ".join(f"{x['from']}->{x['to']} {int(x['flow'])}" for x in rows[:5])
+        legs = ", ".join(f"{x['from']}->{x['to']} {x['last_leg_pax']}" for x in rows[:5])
         return (f"At most {r['max_passengers']} more passengers can get from {r['origin']} to {r['dest']} in the next "
                 f"{r['hours']}h (max flow over free seats on flights still to depart; connection times not checked, so "
                 f"an upper bound). Limited by {r['bottleneck']} ({r['seats_leaving_origin']} free seats leave {r['origin']}, {r['seats_arriving_dest']} arrive at {r['dest']}). "
